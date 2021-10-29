@@ -107,11 +107,8 @@ func (s Financial_accounting) initialize() {
 	error_fatal(err)
 	db.Exec("create table if not exists journal (date text,entry_number integer,account text,value real,price real,quantity real,barcode text,entry_expair text,description text,name text,employee_name text,entry_date text,reverse bool)")
 	db.Exec("create table if not exists inventory (date text,account text,price real,quantity real,barcode text,entry_expair text,name text,employee_name text,entry_date text)")
-	// insert, _ := db.Query("insert into journal(date,entry_number,account,value,price,quantity,barcode,entry_expair,description,name,employee_name,entry_date,reverse) values (2,5,'kkkkkkkk',10,10,5,77777,888,'eiifhsi','kdkdk','skjsidj',787878,true)")
 	// defer db.Close()s
 	// defer insert.Close()
-
-	// https://tutorialedge.net/golang/golang-mysql-tutorial/
 
 	price_discount_tax = concat(s.Fifo, s.Lifo, s.Wma, s.Service)
 	for index, i := range price_discount_tax {
@@ -182,10 +179,29 @@ func journal_entry(array_of_entry []Account_value_quantity_barcode, auto_complet
 			log.Fatal(entry.Account + " is in inventory you just can use expire or make it empty")
 		}
 	}
+	type Account_barcode struct {
+		Account, barcode string
+	}
+	g := map[Account_barcode]*Account_value_quantity_barcode{}
+	for _, i := range array_of_entry {
+		k := Account_barcode{i.Account, i.barcode}
+		sums := g[k]
+		if sums == nil {
+			sums = &Account_value_quantity_barcode{}
+			g[k] = sums
+		}
+		sums.value += i.value
+		sums.quantity += i.quantity
+	}
+	array_of_entry = []Account_value_quantity_barcode{}
+	for k, v := range g {
+		array_of_entry = append(array_of_entry, Account_value_quantity_barcode{k.Account, v.value, v.quantity, k.barcode})
+	}
+	fmt.Println(array_of_entry)
 
-	if entry_to_correct != 0 { // and date<? and reverse=false
-		rows, _ := db.Query("select * from journal where entry_number=? ", entry_to_correct) //, now)
-		var array_of_entry_to_reverse []journal_tag
+	var array_of_entry_to_reverse []journal_tag
+	if entry_to_correct != 0 {
+		rows, _ := db.Query("select * from journal where entry_number=? and date<? and reverse=false", entry_to_correct, now)
 		for rows.Next() {
 			var tag journal_tag
 			rows.Scan(&tag.date, &tag.entry_number, &tag.account, &tag.value, &tag.price, &tag.quantity, &tag.barcode, &tag.entry_expair, &tag.description, &tag.name, &tag.employee_name, &tag.entry_date, &tag.reverse)
@@ -204,17 +220,12 @@ func journal_entry(array_of_entry []Account_value_quantity_barcode, auto_complet
 			array_of_entry_to_reverse[index].description = "(reverse entry for entry number " + strconv.Itoa(entry.entry_number) + " entered by " + entry.employee_name + " and revised by " + employee_name + ")"
 			array_of_entry_to_reverse[index].employee_name = employee_name
 			array_of_entry_to_reverse[index].entry_date = now.Format("2006-01-02 15:04:05.000000000")
-
 			if is_in(entry.account, inventory) {
 				weighted_average([]string{entry.account})
-				if array_of_entry_to_reverse[index].quantity < 0 {
-					cost_flow(entry.account, array_of_entry_to_reverse[index].quantity, entry.barcode, "asc")
-				}
 			}
 		}
-		insert(array_of_entry_to_reverse)
 		db.Exec("update journal set reverse=True where entry_number=?", entry_to_correct)
-		// db.Exec("delete from journal where reverse=True and date>?", now)
+		db.Exec("delete from journal where reverse=True and date>?", now)
 	}
 
 	if auto_completion {
@@ -224,12 +235,13 @@ func journal_entry(array_of_entry []Account_value_quantity_barcode, auto_complet
 			quantity := math.Abs(entry.quantity)
 			if is_in(entry.Account, inventory) && entry.quantity < 0 {
 				if is_in(entry.Account, fifo) || is_in(entry.Account, wma) {
-					costs = cost_flow(entry.Account, entry.quantity, entry.barcode, "asc")
+					costs = cost_flow(entry.Account, entry.quantity, entry.barcode, "asc", false)
 				} else if is_in(entry.Account, lifo) {
-					costs = cost_flow(entry.Account, entry.quantity, entry.barcode, "desc")
+					costs = cost_flow(entry.Account, entry.quantity, entry.barcode, "desc", false)
 				} else {
 					continue
 				}
+				array_of_entry[index] = Account_value_quantity_barcode{entry.Account, -costs, -quantity, entry.barcode}
 				array_of_entry = append(array_of_entry, Account_value_quantity_barcode{"cost of " + entry.Account, costs, quantity, entry.barcode})
 				array_of_entry = append(array_of_entry, price_discount_tax_list(entry.Account, quantity)...)
 			} else if is_in(entry.Account, service) {
@@ -270,12 +282,13 @@ func journal_entry(array_of_entry []Account_value_quantity_barcode, auto_complet
 	var zero float64
 	var price_slice []float64
 	for index, entry := range array_of_entry {
-		// if is_in(entry.Account, concat_strings_slice(equity_normal, equity_contra)) {
-		// 	var account_balance float64
-		// 	db.QueryRow("select sum(value) from journal where account=? and date<?", entry.Account, now).Scan(&account_balance)
-		// 	if account_balance==None:account_balance=0
-		// 			assert Decimal(str(account_balance+i[1]))>0,f'you cant enter {i} because you have {account_balance} and that will make the balance of {i[0]} negative {Decimal(str(account_balance+i[1]))} and that you just can do it in equity accounts not other accounts'
-		// }
+		if !is_in(entry.Account, concat_strings_slice(equity_normal, equity_contra)) {
+			var account_balance float64
+			db.QueryRow("select sum(value) from journal where account=? and date<?", entry.Account, now).Scan(&account_balance)
+			if account_balance+entry.value < 0 {
+				log.Fatal("you cant enter ", entry, " because you have ", account_balance, " and that will make the balance of ", entry.Account, " negative ", account_balance+entry.value, " and that you just can do it in equity accounts not other accounts")
+			}
+		}
 		price_slice = append(price_slice, entry.value/entry.quantity)
 		if price_slice[index] < 0 {
 			log.Fatal("the ", entry.value, " and ", entry.quantity, " for ", entry, " should be positive both or negative both")
@@ -461,11 +474,33 @@ func journal_entry(array_of_entry []Account_value_quantity_barcode, auto_complet
 			array_to_insert = append(array_to_insert, element...)
 		}
 	}
-	// insert(array_to_insert)
+
+	array_to_insert = append(array_of_entry_to_reverse, array_to_insert...)
+	for _, entry := range array_to_insert {
+		db.Exec("insert into journal(date,entry_number,account,value,price,quantity,barcode,entry_expair,description,name,employee_name,entry_date,reverse) values (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+			&entry.date, &entry.entry_number, &entry.account, &entry.value, &entry.price, &entry.quantity, &entry.barcode,
+			&entry.entry_expair, &entry.description, &entry.name, &entry.employee_name, &entry.entry_date, &entry.reverse)
+		if is_in(entry.account, inventory) {
+			if entry.quantity > 0 {
+				db.Exec("insert into inventory(date,account,price,quantity,barcode,entry_expair,name,employee_name,entry_date)values (?,?,?,?,?,?,?,?,?)",
+					&entry.date, &entry.account, &entry.price, &entry.quantity, &entry.barcode, &entry.entry_expair, &entry.name, &entry.employee_name, &entry.entry_date)
+			} else {
+				switch {
+				case is_in(entry.account, fifo):
+					cost_flow(entry.account, entry.quantity, entry.barcode, "asc", true)
+				case is_in(entry.account, lifo):
+					cost_flow(entry.account, entry.quantity, entry.barcode, "desc", true)
+				case is_in(entry.account, wma):
+					weighted_average([]string{entry.account})
+					cost_flow(entry.account, entry.quantity, entry.barcode, "asc", true)
+				}
+			}
+		}
+	}
 	return array_to_insert, invoice, now, entry_number
 }
 
-func cost_flow(account string, quantity float64, barcode string, order_by_date_asc_or_desc string) float64 {
+func cost_flow(account string, quantity float64, barcode string, order_by_date_asc_or_desc string, insert bool) float64 {
 	rows, _ := db.Query("select price,quantity from inventory where quantity>0 and account=? and barcode=? order by date "+order_by_date_asc_or_desc, account, barcode)
 	var inventory []journal_tag
 	for rows.Next() {
@@ -479,13 +514,17 @@ func cost_flow(account string, quantity float64, barcode string, order_by_date_a
 	for _, item := range inventory {
 		if item.quantity >= quantity_count {
 			costs += item.price * quantity_count
-			db.Exec("update inventory set quantity=quantity-? where account=? and price=? and quantity=? and barcode=? order by date "+order_by_date_asc_or_desc+" limit 1", quantity_count, account, item.price, item.quantity, barcode)
+			if insert {
+				db.Exec("update inventory set quantity=quantity-? where account=? and price=? and quantity=? and barcode=? order by date "+order_by_date_asc_or_desc+" limit 1", quantity_count, account, item.price, item.quantity, barcode)
+			}
 			quantity_count = 0
 			break
 		}
 		if item.quantity < quantity_count {
 			costs += item.price * item.quantity
-			db.Exec("update inventory set quantity=0 where account=? and price=? and quantity=? and barcode=? order by date "+order_by_date_asc_or_desc+" limit 1", account, item.price, item.quantity, barcode)
+			if insert {
+				db.Exec("update inventory set quantity=0 where account=? and price=? and quantity=? and barcode=? order by date "+order_by_date_asc_or_desc+" limit 1", account, item.price, item.quantity, barcode)
+			}
 			quantity_count -= item.quantity
 		}
 	}
@@ -498,18 +537,6 @@ func cost_flow(account string, quantity float64, barcode string, order_by_date_a
 func weighted_average(array_of_accounts []string) {
 	for _, account := range array_of_accounts {
 		db.Exec("update inventory set price=(select sum(value)/sum(quantity) from journal where account=?) where account=?", account, account)
-	}
-}
-
-func insert(array_of_entry []journal_tag) {
-	for _, entry := range array_of_entry {
-		db.Exec("insert into journal(date,entry_number,account,value,price,quantity,barcode,entry_expair,description,name,employee_name,entry_date,reverse) values (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-			&entry.date, &entry.entry_number, &entry.account, &entry.value, &entry.price, &entry.quantity, &entry.barcode,
-			&entry.entry_expair, &entry.description, &entry.name, &entry.employee_name, &entry.entry_date, &entry.reverse)
-		if is_in(entry.account, inventory) && entry.quantity > 0 {
-			db.Exec("insert into inventory(date,account,price,quantity,barcode,entry_expair,name,employee_name,entry_date)values (?,?,?,?,?,?,?,?,?)",
-				&entry.date, &entry.account, &entry.price, &entry.quantity, &entry.barcode, &entry.entry_expair, &entry.name, &entry.employee_name, &entry.entry_date)
-		}
 	}
 }
 
@@ -669,17 +696,17 @@ func main() {
 		// Start_date:                 time.Date(2020, time.May, 21, 13, 00, 00, 00, time.Local),
 		// End_date:                   time.Date(2022, time.May, 20, 13, 00, 00, 00, time.Local),
 		Discount:                   0,
-		Invoice_discounts_tax_list: [][3]float64{{5, -1, -1}, {100, -1, -1}},
-		Fifo:                       []Account_price_discount_tax{},
-		Lifo:                       []Account_price_discount_tax{{"book1", 15, 0.1, 0}, {"book2", 15, -0.1, 0}},
+		Invoice_discounts_tax_list: [][3]float64{{5, 0, 0}, {100, 0, 0}},
+		Fifo:                       []Account_price_discount_tax{{"book1", 15, 0, 0}},
+		Lifo:                       []Account_price_discount_tax{{"book2", 15, 0, 0}},
 		Wma:                        []Account_price_discount_tax{{"book", 10, -1, -1}},
 		Service:                    []Account_price_discount_tax{{"Service Revenue", 2, -1, -1}},
-		Assets_normal:              []string{"Office Equipment", "Advertising Supplies", "Prepaid Insurance"},
+		Assets_normal:              []string{"Office Equipment", "Advertising Supplies", "Prepaid Insurance", "debetors"},
 		Cash_and_cash_equivalent:   []string{"Cash"},
 		Assets_contra:              []string{"kkkkkkkk"},
-		Liabilities_normal:         []string{},
+		Liabilities_normal:         []string{"basma"},
 		Liabilities_contra:         []string{},
-		Equity_normal:              []string{},
+		Equity_normal:              []string{"hash"},
 		Comprehensive_income:       []string{},
 		Equity_contra:              []string{},
 		Withdrawals:                []string{},
@@ -694,7 +721,7 @@ func main() {
 		Losses:                     []string{},
 	}
 	v.initialize()
-	entry, invoice, time, entry_number := journal_entry([]Account_value_quantity_barcode{{"Service Revenue", 1024, 1024, ""}, {"Cash", 1024, 1024, ""}}, true, 0 /*uint(entry_number())-1*/, time.Date(2021, time.May, 21, 13, 00, 00, 00, time.Local),
+	entry, invoice, time, entry_number := journal_entry([]Account_value_quantity_barcode{{"r", 10, 10, ""}, {"Cash", 10, 10, ""}}, true, 0 /*uint(entry_number())-1*/, time.Time{},
 		time.Time{}, "", "", "yasa", "hashem", []day_start_end{})
 
 	fmt.Println(invoice, time, entry_number)
