@@ -592,15 +592,10 @@ func entry_number() int {
 	return tag + 1
 }
 
-func hour(hour, minute int) time.Time {
-	Date := time.Date(0000, 1, 1, hour, minute, 00, 00, time.Local)
-	return Date
-}
-
 func check_all_accounts() {
 	accounts := column_values("account")
 	for _, account := range accounts {
-		if is_in(account, all_accounts) == false {
+		if !is_in(account, all_accounts) {
 			log.Fatal(account + " is not on parameters accounts lists")
 		}
 	}
@@ -618,13 +613,13 @@ func is_in(element string, elements []string) bool {
 func column_values(column string) []string {
 	results, err := db.Query("select " + column + " from journal")
 	error_fatal(err)
-	v := []string{}
+	column_values := []string{}
 	for results.Next() {
-		var journal_tag journal_tag
-		results.Scan(&journal_tag.account)
-		v = append(v, journal_tag.account)
+		var tag string
+		results.Scan(&tag)
+		column_values = append(column_values, tag)
 	}
-	return v
+	return column_values
 }
 
 func error_fatal(err error) {
@@ -635,7 +630,7 @@ func error_fatal(err error) {
 
 func dates(date time.Time) time.Time {
 	if date.IsZero() {
-		date = now
+		return now
 	}
 	return date
 }
