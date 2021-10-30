@@ -78,7 +78,7 @@ type invoice_tag struct {
 
 var (
 	fifo, lifo, wma, service, inventory, cost_of_goods_sold, discounts, tax, revenues, assets_normal, liabilities_normal, equity_normal, assets_contra, liabilities_contra, equity_contra,
-	itda, expenses, temporary_debit_accounts, temporary_credit_accounts, temporary_accounts, debit_accounts, credit_accounts, all_accounts []string
+	itda, expenses, temporary_debit_accounts, temporary_credit_accounts, temporary_accounts, debit_accounts, credit_accounts []string
 	invoice_discounts_tax_list [][3]float64
 	db                         *sql.DB
 	err                        error
@@ -142,12 +142,34 @@ func (s Financial_accounting) initialize() {
 	temporary_accounts = concat_strings_slice(temporary_debit_accounts, temporary_credit_accounts)
 	debit_accounts = concat_strings_slice(assets_normal, liabilities_contra, equity_contra, temporary_debit_accounts)
 	credit_accounts = concat_strings_slice(assets_contra, liabilities_normal, equity_normal, temporary_credit_accounts)
-	all_accounts = concat_strings_slice(debit_accounts, credit_accounts)
+	all_accounts := concat_strings_slice(debit_accounts, credit_accounts)
 	invoice_discounts_tax_list = s.Invoice_discounts_tax_list
 
-	expair_expenses()
-	check_all_accounts()
-	check_if_duplicates(append(debit_accounts, credit_accounts...))
+	entry_number := entry_number()
+	var array_to_insert []journal_tag
+	expair_expenses := journal_tag{now.Format("2006-01-02 15:04:05.000000000"), entry_number, "expair_expenses", 0, 0, 0, "", time.Time{}.Format("2006-01-02 15:04:05.000000000"),
+		"to record the expiry of the goods automatically", "", "", now.Format("2006-01-02 15:04:05.000000000"), false}
+	expair_goods, _ := db.Query("select account,price*quantity*-1,price,quantity*-1,barcode from inventory where entry_expair<?", now)
+	for expair_goods.Next() {
+		tag := expair_expenses
+		expair_goods.Scan(&tag.account, &tag.value, &tag.price, &tag.quantity, &tag.barcode)
+		expair_expenses.value -= tag.value
+		expair_expenses.quantity -= tag.quantity
+		array_to_insert = append(array_to_insert, tag)
+	}
+	expair_expenses.price = expair_expenses.value / expair_expenses.quantity
+	array_to_insert = append(array_to_insert, expair_expenses)
+	insert_to_database(array_to_insert, true, false, false)
+	db.Exec("delete from inventory where entry_expair<?", now)
+
+	accounts := column_values("account")
+	for _, account := range accounts {
+		if !is_in(account, all_accounts) {
+			log.Fatal(account + " is not on parameters accounts lists")
+		}
+	}
+
+	check_if_duplicates(all_accounts)
 	start_date, end_date = check_dates(dates(s.Start_date), dates(s.End_date))
 }
 
@@ -545,25 +567,6 @@ func cost_flow(account string, quantity float64, barcode string, order_by_date_a
 	return costs
 }
 
-func expair_expenses() {
-	entry_number := entry_number()
-	var array_to_insert []journal_tag
-	expair_expenses := journal_tag{now.Format("2006-01-02 15:04:05.000000000"), entry_number, "expair_expenses", 0, 0, 0, "", time.Time{}.Format("2006-01-02 15:04:05.000000000"),
-		"to record the expiry of the goods automatically", "", "", now.Format("2006-01-02 15:04:05.000000000"), false}
-	expair_goods, _ := db.Query("select account,price*quantity*-1,price,quantity*-1,barcode from inventory where entry_expair<?", now)
-	for expair_goods.Next() {
-		tag := expair_expenses
-		expair_goods.Scan(&tag.account, &tag.value, &tag.price, &tag.quantity, &tag.barcode)
-		expair_expenses.value -= tag.value
-		expair_expenses.quantity -= tag.quantity
-		array_to_insert = append(array_to_insert, tag)
-	}
-	expair_expenses.price = expair_expenses.value / expair_expenses.quantity
-	array_to_insert = append(array_to_insert, expair_expenses)
-	insert_to_database(array_to_insert, true, false, false)
-	db.Exec("delete from inventory where entry_expair<?", now)
-}
-
 func weighted_average(array_of_accounts []string) {
 	for _, account := range array_of_accounts {
 		db.Exec("update inventory set price=(select sum(value)/sum(quantity) from journal where account=?) where account=?", account, account)
@@ -590,15 +593,6 @@ func entry_number() int {
 		tag = 0
 	}
 	return tag + 1
-}
-
-func check_all_accounts() {
-	accounts := column_values("account")
-	for _, account := range accounts {
-		if !is_in(account, all_accounts) {
-			log.Fatal(account + " is not on parameters accounts lists")
-		}
-	}
 }
 
 func is_in(element string, elements []string) bool {
@@ -746,7 +740,7 @@ func main() {
 		Losses:                     []string{},
 	}
 	v.initialize()
-	entry, invoice, time, entry_number := journal_entry([]Account_value_quantity_barcode{{"r", 10, 10, ""}, {"Cash", 10, 10, ""}}, true, 0 /*uint(entry_number())-1*/, time.Time{},
+	entry, invoice, time, entry_number := journal_entry([]Account_value_quantity_barcode{{"r", 10, 10, ""}, {"r", -10, -10, ""}}, true, 0 /*uint(entry_number())-1*/, time.Time{},
 		time.Time{}, "", "", "yasa", "hashem", []day_start_end{})
 
 	fmt.Println(invoice, time, entry_number)
