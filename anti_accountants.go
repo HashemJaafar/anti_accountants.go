@@ -145,6 +145,7 @@ func (s Financial_accounting) initialize() {
 	all_accounts = concat_strings_slice(debit_accounts, credit_accounts)
 	invoice_discounts_tax_list = s.Invoice_discounts_tax_list
 
+	expair_expenses()
 	check_all_accounts()
 	check_if_duplicates(append(debit_accounts, credit_accounts...))
 	start_date, end_date = check_dates(dates(s.Start_date), dates(s.End_date))
@@ -179,6 +180,7 @@ func journal_entry(array_of_entry []Account_value_quantity_barcode, auto_complet
 			log.Fatal(entry.Account + " is in inventory you just can use expire or make it empty")
 		}
 	}
+
 	type Account_barcode struct {
 		Account, barcode string
 	}
@@ -197,7 +199,6 @@ func journal_entry(array_of_entry []Account_value_quantity_barcode, auto_complet
 	for k, v := range g {
 		array_of_entry = append(array_of_entry, Account_value_quantity_barcode{k.Account, v.value, v.quantity, k.barcode})
 	}
-	fmt.Println(array_of_entry)
 
 	var array_of_entry_to_reverse []journal_tag
 	if entry_to_correct != 0 {
@@ -476,28 +477,38 @@ func journal_entry(array_of_entry []Account_value_quantity_barcode, auto_complet
 	}
 
 	array_to_insert = append(array_of_entry_to_reverse, array_to_insert...)
+	insert_to_database(array_to_insert, true, true, true)
+	return array_to_insert, invoice, now, entry_number
+}
+
+func insert_to_database(array_to_insert []journal_tag, insert_into_journal, insert_into_inventory, inventory_flow bool) {
 	for _, entry := range array_to_insert {
-		db.Exec("insert into journal(date,entry_number,account,value,price,quantity,barcode,entry_expair,description,name,employee_name,entry_date,reverse) values (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-			&entry.date, &entry.entry_number, &entry.account, &entry.value, &entry.price, &entry.quantity, &entry.barcode,
-			&entry.entry_expair, &entry.description, &entry.name, &entry.employee_name, &entry.entry_date, &entry.reverse)
+		if insert_into_journal {
+			db.Exec("insert into journal(date,entry_number,account,value,price,quantity,barcode,entry_expair,description,name,employee_name,entry_date,reverse) values (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+				&entry.date, &entry.entry_number, &entry.account, &entry.value, &entry.price, &entry.quantity, &entry.barcode,
+				&entry.entry_expair, &entry.description, &entry.name, &entry.employee_name, &entry.entry_date, &entry.reverse)
+		}
 		if is_in(entry.account, inventory) {
 			if entry.quantity > 0 {
-				db.Exec("insert into inventory(date,account,price,quantity,barcode,entry_expair,name,employee_name,entry_date)values (?,?,?,?,?,?,?,?,?)",
-					&entry.date, &entry.account, &entry.price, &entry.quantity, &entry.barcode, &entry.entry_expair, &entry.name, &entry.employee_name, &entry.entry_date)
+				if insert_into_inventory {
+					db.Exec("insert into inventory(date,account,price,quantity,barcode,entry_expair,name,employee_name,entry_date)values (?,?,?,?,?,?,?,?,?)",
+						&entry.date, &entry.account, &entry.price, &entry.quantity, &entry.barcode, &entry.entry_expair, &entry.name, &entry.employee_name, &entry.entry_date)
+				}
 			} else {
-				switch {
-				case is_in(entry.account, fifo):
-					cost_flow(entry.account, entry.quantity, entry.barcode, "asc", true)
-				case is_in(entry.account, lifo):
-					cost_flow(entry.account, entry.quantity, entry.barcode, "desc", true)
-				case is_in(entry.account, wma):
-					weighted_average([]string{entry.account})
-					cost_flow(entry.account, entry.quantity, entry.barcode, "asc", true)
+				if inventory_flow {
+					switch {
+					case is_in(entry.account, fifo):
+						cost_flow(entry.account, entry.quantity, entry.barcode, "asc", true)
+					case is_in(entry.account, lifo):
+						cost_flow(entry.account, entry.quantity, entry.barcode, "desc", true)
+					case is_in(entry.account, wma):
+						weighted_average([]string{entry.account})
+						cost_flow(entry.account, entry.quantity, entry.barcode, "asc", true)
+					}
 				}
 			}
 		}
 	}
-	return array_to_insert, invoice, now, entry_number
 }
 
 func cost_flow(account string, quantity float64, barcode string, order_by_date_asc_or_desc string, insert bool) float64 {
@@ -532,6 +543,25 @@ func cost_flow(account string, quantity float64, barcode string, order_by_date_a
 		log.Fatal("you order ", quantity, " but you have ", quantity-quantity_count, " ", account, " with barcode ", barcode)
 	}
 	return costs
+}
+
+func expair_expenses() {
+	entry_number := entry_number()
+	var array_to_insert []journal_tag
+	expair_expenses := journal_tag{now.Format("2006-01-02 15:04:05.000000000"), entry_number, "expair_expenses", 0, 0, 0, "", time.Time{}.Format("2006-01-02 15:04:05.000000000"),
+		"to record the expiry of the goods automatically", "", "", now.Format("2006-01-02 15:04:05.000000000"), false}
+	expair_goods, _ := db.Query("select account,price*quantity*-1,price,quantity*-1,barcode from inventory where entry_expair<?", now)
+	for expair_goods.Next() {
+		tag := expair_expenses
+		expair_goods.Scan(&tag.account, &tag.value, &tag.price, &tag.quantity, &tag.barcode)
+		expair_expenses.value -= tag.value
+		expair_expenses.quantity -= tag.quantity
+		array_to_insert = append(array_to_insert, tag)
+	}
+	expair_expenses.price = expair_expenses.value / expair_expenses.quantity
+	array_to_insert = append(array_to_insert, expair_expenses)
+	insert_to_database(array_to_insert, true, false, false)
+	db.Exec("delete from inventory where entry_expair<?", now)
 }
 
 func weighted_average(array_of_accounts []string) {
