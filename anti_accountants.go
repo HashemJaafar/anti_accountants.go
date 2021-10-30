@@ -283,11 +283,11 @@ func journal_entry(array_of_entry []Account_value_quantity_barcode, auto_complet
 	var zero float64
 	var price_slice []float64
 	for index, entry := range array_of_entry {
-		if !is_in(entry.Account, concat_strings_slice(equity_normal, equity_contra)) {
+		if !is_in(entry.Account, equity_normal) {
 			var account_balance float64
 			db.QueryRow("select sum(value) from journal where account=? and date<?", entry.Account, now).Scan(&account_balance)
 			if account_balance+entry.value < 0 {
-				log.Fatal("you cant enter ", entry, " because you have ", account_balance, " and that will make the balance of ", entry.Account, " negative ", account_balance+entry.value, " and that you just can do it in equity accounts not other accounts")
+				log.Fatal("you cant enter ", entry, " because you have ", account_balance, " and that will make the balance of ", entry.Account, " negative ", account_balance+entry.value, " and that you just can do it in equity_normal accounts not other accounts")
 			}
 		}
 		price_slice = append(price_slice, entry.value/entry.quantity)
