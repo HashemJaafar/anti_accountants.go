@@ -49,7 +49,6 @@ type directory_account struct {
 
 type Financial_accounting struct {
 	Company_name               string
-	Start_date, End_date       time.Time
 	Discount                   float64
 	Invoice_discounts_tax_list [][3]float64
 	Fifo, Lifo, Wma, Service   []directory_account_price_discount_tax
@@ -81,6 +80,14 @@ type invoice_tag struct {
 	total_discount       float64
 	discount             float64
 	quantity             float64
+}
+
+type statement struct {
+	directory_no []uint
+	Account      string
+	value, price, quantity, analysis,
+	budget_value, budget_price, budget_quantity, budget_analysis,
+	difference float64
 }
 
 var (
@@ -195,7 +202,6 @@ func (s Financial_accounting) initialize() {
 
 	check_if_duplicates_directory(all_directorys)
 	check_if_duplicates(all_accounts)
-	start_date, end_date = check_dates(dates(s.Start_date), dates(s.End_date))
 }
 
 func journal_entry(array_of_entry []Account_value_quantity_barcode, auto_completion bool, entry_to_correct uint, date time.Time, entry_expair time.Time, adjusting_method string,
@@ -528,6 +534,12 @@ func journal_entry(array_of_entry []Account_value_quantity_barcode, auto_complet
 	return array_to_insert, invoice, now, entry_number
 }
 
+func financial_statements(start_date, end_date time.Time, remove_empties bool) ([]statement, []statement) {
+	start_date, end_date = check_dates(dates(start_date), dates(end_date))
+	var balance_sheet, cash_flow []statement
+	return balance_sheet, cash_flow
+}
+
 func insert_to_database(array_to_insert []journal_tag, insert_into_journal, insert_into_inventory, inventory_flow bool) {
 	for _, entry := range array_to_insert {
 		if insert_into_journal {
@@ -763,9 +775,7 @@ func transpose(slice [][]journal_tag) [][]journal_tag {
 
 func main() {
 	v := Financial_accounting{
-		Company_name: "hashem2",
-		// Start_date:                 time.Date(2020, time.May, 21, 13, 00, 00, 00, time.Local),
-		// End_date:                   time.Date(2022, time.May, 20, 13, 00, 00, 00, time.Local),
+		Company_name:               "hashem2",
 		Discount:                   0,
 		Invoice_discounts_tax_list: [][3]float64{{5, 0, 0}, {100, 0, 0}},
 		Fifo:                       []directory_account_price_discount_tax{{[]uint{1, 3, 1}, "book1", 15, 0, 0}},
@@ -785,11 +795,19 @@ func main() {
 		Expenses:                   []directory_account{{[]uint{3, 4}, "tax of service revenue"}, {[]uint{3, 2}, "expair_expenses"}, {[]uint{3, 3}, "cost of book"}, {[]uint{3, 5}, "tax of book"}},
 	}
 	v.initialize()
-	entry, invoice, time, entry_number := journal_entry([]Account_value_quantity_barcode{{"book", 10, -10, ""}, {"cash", 90, 90, ""}}, true, 0 /*uint(entry_number())-1*/, time.Time{},
-		time.Time{}, "", "", "yasa", "hashem", []day_start_end{})
+	// entry, invoice, t, entry_number := journal_entry([]Account_value_quantity_barcode{{"book", 10, -10, ""}, {"cash", 90, 90, ""}}, true, 0 /*uint(entry_number())-1*/, time.Time{},
+	// 	time.Time{}, "", "", "yasa", "hashem", []day_start_end{})
 
-	fmt.Println(invoice, time, entry_number)
-	for _, i := range entry {
+	// fmt.Println(invoice, t, entry_number)
+	// for _, i := range entry {
+	// 	fmt.Println(i)
+	// }
+
+	balance_sheet, cash_flow := financial_statements(time.Date(2020, time.May, 21, 13, 00, 00, 00, time.Local), time.Date(2022, time.May, 20, 13, 00, 00, 00, time.Local), true)
+	for _, i := range balance_sheet {
+		fmt.Println(i)
+	}
+	for _, i := range cash_flow {
 		fmt.Println(i)
 	}
 }
