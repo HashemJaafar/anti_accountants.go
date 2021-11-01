@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -36,13 +37,13 @@ type Account_value_quantity_barcode struct {
 }
 
 type directory_account_price_discount_tax struct {
-	directory_no         []int
+	directory_no         []uint
 	Account              string
 	Price, Discount, Tax float64
 }
 
 type directory_account struct {
-	directory_no []int
+	directory_no []uint
 	account_name string
 }
 
@@ -116,7 +117,7 @@ func (s Financial_accounting) initialize() {
 	// defer db.Close()s
 	// defer insert.Close()
 
-	price_discount_tax = concat(s.Fifo, s.Lifo, s.Wma, s.Service)
+	price_discount_tax = concat(s.Fifo, s.Lifo, s.Wma, s.Service).([]directory_account_price_discount_tax)
 	for index, i := range price_discount_tax {
 		price_discount_tax[index].Discount = discount_tax_calculator(i.Price, i.Discount)
 		price_discount_tax[index].Tax = discount_tax_calculator(i.Price, i.Tax)
@@ -131,9 +132,9 @@ func (s Financial_accounting) initialize() {
 	lifo = accounts_slice(s.Lifo)
 	wma = accounts_slice(s.Wma)
 	service = accounts_slice(s.Service)
-	inventory = concat_strings_slice(fifo, lifo, wma)
+	inventory = concat(fifo, lifo, wma).([]string)
 	cash_and_cash_equivalent = accounts_name(s.Cash_and_cash_equivalent)
-	assets_normal = concat_strings_slice(accounts_name(s.Assets_normal), cash_and_cash_equivalent, inventory)
+	assets_normal = concat(accounts_name(s.Assets_normal), cash_and_cash_equivalent, inventory).([]string)
 	assets_contra = accounts_name(s.Assets_contra)
 	liabilities_normal = accounts_name(s.Liabilities_normal)
 	liabilities_contra = accounts_name(s.Liabilities_contra)
@@ -142,12 +143,12 @@ func (s Financial_accounting) initialize() {
 	withdrawals = accounts_name(s.Withdrawals)
 	revenues = accounts_name(s.Revenues)
 	discounts = accounts_name(s.Discounts)
-	expenses = concat_strings_slice(accounts_name(s.Expenses), discounts)
-	temporary_debit_accounts = concat_strings_slice(withdrawals, expenses)
-	temporary_accounts = concat_strings_slice(temporary_debit_accounts, revenues)
-	debit_accounts = concat_strings_slice(assets_normal, liabilities_contra, equity_contra, temporary_debit_accounts)
-	credit_accounts = concat_strings_slice(assets_contra, liabilities_normal, equity_normal, revenues)
-	all_accounts := concat_strings_slice(debit_accounts, credit_accounts)
+	expenses = concat(accounts_name(s.Expenses), discounts).([]string)
+	temporary_debit_accounts = concat(withdrawals, expenses).([]string)
+	temporary_accounts = concat(temporary_debit_accounts, revenues).([]string)
+	debit_accounts = concat(assets_normal, liabilities_contra, equity_contra, temporary_debit_accounts).([]string)
+	credit_accounts = concat(assets_contra, liabilities_normal, equity_normal, revenues).([]string)
+	all_accounts := concat(debit_accounts, credit_accounts).([]string)
 	invoice_discounts_tax_list = s.Invoice_discounts_tax_list
 
 	entry_number := entry_number()
@@ -175,6 +176,24 @@ func (s Financial_accounting) initialize() {
 		}
 	}
 
+	all_directorys := concat(
+		accounts_directory(s.Fifo),
+		accounts_directory(s.Lifo),
+		accounts_directory(s.Wma),
+		accounts_directory(s.Service),
+		accounts_directory1(s.Assets_normal),
+		accounts_directory1(s.Cash_and_cash_equivalent),
+		accounts_directory1(s.Assets_contra),
+		accounts_directory1(s.Liabilities_normal),
+		accounts_directory1(s.Liabilities_contra),
+		accounts_directory1(s.Equity_normal),
+		accounts_directory1(s.Equity_contra),
+		accounts_directory1(s.Withdrawals),
+		accounts_directory1(s.Revenues),
+		accounts_directory1(s.Discounts),
+		accounts_directory1(s.Expenses)).([][]uint)
+
+	check_if_duplicates_directory(all_directorys)
 	check_if_duplicates(all_accounts)
 	start_date, end_date = check_dates(dates(s.Start_date), dates(s.End_date))
 }
@@ -642,10 +661,9 @@ func check_dates(start_date, end_date time.Time) (time.Time, time.Time) {
 	return start_date, end_date
 }
 
-func check_if_duplicates(list_of_elements []string) {
-	set_of_elems := []string{}
-	duplicated_element := []string{}
-	for _, element := range list_of_elements {
+func check_if_duplicates(slice_of_elements []string) {
+	var set_of_elems, duplicated_element []string
+	for _, element := range slice_of_elements {
 		for _, b := range set_of_elems {
 			if b == element {
 				duplicated_element = append(duplicated_element, element)
@@ -659,20 +677,32 @@ func check_if_duplicates(list_of_elements []string) {
 	}
 }
 
-func concat(args ...[]directory_account_price_discount_tax) []directory_account_price_discount_tax {
-	concated := []directory_account_price_discount_tax{}
-	for _, i := range args {
-		concated = append(concated, i...)
+func check_if_duplicates_directory(slice_of_elements [][]uint) {
+	var set_of_elems, duplicated_element [][]uint
+	for _, element := range slice_of_elements {
+		for _, b := range set_of_elems {
+			if reflect.DeepEqual(b, element) {
+				duplicated_element = append(duplicated_element, element)
+				break
+			}
+		}
+		set_of_elems = append(set_of_elems, element)
 	}
-	return concated
+	if len(duplicated_element) != 0 {
+		log.Fatal(duplicated_element, " is duplicated values in the fields of Financial_accounting and that make error. you should remove the duplicate")
+	}
 }
 
-func concat_strings_slice(args ...[]string) []string {
-	concated := []string{}
-	for _, i := range args {
-		concated = append(concated, i...)
+func concat(args ...interface{}) interface{} {
+	n := 0
+	for _, arg := range args {
+		n += reflect.ValueOf(arg).Len()
 	}
-	return concated
+	v := reflect.MakeSlice(reflect.TypeOf(args[0]), 0, n)
+	for _, arg := range args {
+		v = reflect.AppendSlice(v, reflect.ValueOf(arg))
+	}
+	return v.Interface()
 }
 
 func discount_tax_calculator(price, discount_tax float64) float64 {
@@ -700,12 +730,20 @@ func accounts_name(args []directory_account) []string {
 	return accounts_slice
 }
 
-func concat_strings(args string, slice []string) []string {
-	a := []string{}
-	for _, i := range slice {
-		a = append(a, args+i)
+func accounts_directory(args []directory_account_price_discount_tax) [][]uint {
+	accounts_slice := [][]uint{}
+	for _, i := range args {
+		accounts_slice = append(accounts_slice, i.directory_no)
 	}
-	return a
+	return accounts_slice
+}
+
+func accounts_directory1(args []directory_account) [][]uint {
+	accounts_slice := [][]uint{}
+	for _, i := range args {
+		accounts_slice = append(accounts_slice, i.directory_no)
+	}
+	return accounts_slice
 }
 
 func transpose(slice [][]journal_tag) [][]journal_tag {
@@ -730,21 +768,21 @@ func main() {
 		// End_date:                   time.Date(2022, time.May, 20, 13, 00, 00, 00, time.Local),
 		Discount:                   0,
 		Invoice_discounts_tax_list: [][3]float64{{5, 0, 0}, {100, 0, 0}},
-		Fifo:                       []directory_account_price_discount_tax{{[]int{1, 3}, "book1", 15, 0, 0}},
-		Lifo:                       []directory_account_price_discount_tax{{[]int{1, 3}, "book2", 15, 0, 0}},
-		Wma:                        []directory_account_price_discount_tax{{[]int{1, 3}, "book", 10, -1, -1}},
-		Service:                    []directory_account_price_discount_tax{{[]int{4, 3}, "service revenue", 2, -1, -1}},
-		Assets_normal:              []directory_account{{[]int{1, 3}, "office equipment"}},
-		Cash_and_cash_equivalent:   []directory_account{{[]int{1, 8}, "cash"}},
+		Fifo:                       []directory_account_price_discount_tax{{[]uint{1, 3, 1}, "book1", 15, 0, 0}},
+		Lifo:                       []directory_account_price_discount_tax{{[]uint{1, 3, 2}, "book2", 15, 0, 0}},
+		Wma:                        []directory_account_price_discount_tax{{[]uint{1, 3, 3}, "book", 10, -1, -1}},
+		Service:                    []directory_account_price_discount_tax{{[]uint{4, 3, 4}, "service revenue", 2, -1, -1}},
+		Assets_normal:              []directory_account{{[]uint{1, 1}, "office equipment"}},
+		Cash_and_cash_equivalent:   []directory_account{{[]uint{1, 8}, "cash"}},
 		Assets_contra:              []directory_account{},
-		Liabilities_normal:         []directory_account{{[]int{2, 1}, "tax"}},
+		Liabilities_normal:         []directory_account{{[]uint{2, 1}, "tax"}},
 		Liabilities_contra:         []directory_account{},
 		Equity_normal:              []directory_account{},
 		Equity_contra:              []directory_account{},
 		Withdrawals:                []directory_account{},
-		Revenues:                   []directory_account{{[]int{4, 1}, "revenue of service revenue"}, {[]int{4, 2}, "revenue of book"}},
-		Discounts:                  []directory_account{{[]int{3, 1}, "discount of service revenue"}, {[]int{3, 3}, "discount of book"}},
-		Expenses:                   []directory_account{{[]int{3, 1}, "tax of service revenue"}, {[]int{3, 2}, "expair_expenses"}, {[]int{3, 3}, "cost of book"}, {[]int{3, 3}, "tax of book"}},
+		Revenues:                   []directory_account{{[]uint{4, 1}, "revenue of service revenue"}, {[]uint{4, 2}, "revenue of book"}},
+		Discounts:                  []directory_account{{[]uint{3, 1}, "discount of service revenue"}, {[]uint{3, 6}, "discount of book"}},
+		Expenses:                   []directory_account{{[]uint{3, 4}, "tax of service revenue"}, {[]uint{3, 2}, "expair_expenses"}, {[]uint{3, 3}, "cost of book"}, {[]uint{3, 5}, "tax of book"}},
 	}
 	v.initialize()
 	entry, invoice, time, entry_number := journal_entry([]Account_value_quantity_barcode{{"book", 10, -10, ""}, {"cash", 90, 90, ""}}, true, 0 /*uint(entry_number())-1*/, time.Time{},
