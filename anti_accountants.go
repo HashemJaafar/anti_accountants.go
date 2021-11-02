@@ -11,7 +11,8 @@ import (
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
-	_ "github.com/tobgu/qframe"
+	"github.com/tobgu/qframe"
+	qsql "github.com/tobgu/qframe/config/sql"
 )
 
 type day_start_end struct {
@@ -536,6 +537,12 @@ func journal_entry(array_of_entry []Account_value_quantity_barcode, auto_complet
 
 func financial_statements(start_date, end_date time.Time, remove_empties bool) ([]statement, []statement) {
 	start_date, end_date = check_dates(dates(start_date), dates(end_date))
+	tx, _ := db.Begin()
+	journal := qframe.ReadSQL(tx, qsql.Query("select date,entry_number,account,value,quantity from journal"))
+	journal_before := journal.Filter(qframe.And(qframe.Filter{Column: "date", Comparator: "<", Arg: start_date.String()})).Drop("date", "entry_number", "entry_expair")
+	journal_after := journal.Filter(qframe.And(qframe.Filter{Column: "date", Comparator: ">=", Arg: start_date.String()}, qframe.Filter{Column: "date", Comparator: "<=", Arg: end_date.String()})).Drop("date", "entry_number", "entry_expair")
+	retained_earnings := journal_before.Filter(qframe.And(qframe.Filter{Column: "account", Comparator: "=", Arg: temporary_debit_accounts})).Drop("date", "entry_number", "entry_expair")
+	fmt.Println(retained_earnings, journal_after)
 	var balance_sheet, cash_flow []statement
 	return balance_sheet, cash_flow
 }
@@ -803,7 +810,7 @@ func main() {
 	// 	fmt.Println(i)
 	// }
 
-	balance_sheet, cash_flow := financial_statements(time.Date(2020, time.May, 21, 13, 00, 00, 00, time.Local), time.Date(2022, time.May, 20, 13, 00, 00, 00, time.Local), true)
+	balance_sheet, cash_flow := financial_statements(time.Date(202, time.May, 21, 13, 00, 00, 00, time.Local), time.Date(2021, time.May, 20, 13, 00, 00, 00, time.Local), true)
 	for _, i := range balance_sheet {
 		fmt.Println(i)
 	}
