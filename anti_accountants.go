@@ -11,8 +11,6 @@ import (
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
-	"github.com/tobgu/qframe"
-	qsql "github.com/tobgu/qframe/config/sql"
 )
 
 type day_start_end struct {
@@ -85,7 +83,7 @@ type invoice_tag struct {
 
 type statement struct {
 	directory_no []uint
-	Account      string
+	account      string
 	value, price, quantity, analysis,
 	budget_value, budget_price, budget_quantity, budget_analysis,
 	difference float64
@@ -121,7 +119,7 @@ func (s Financial_accounting) initialize() {
 	_, err = db.Exec("USE " + s.Company_name)
 	error_fatal(err)
 	db.Exec("create table if not exists journal (date text,entry_number integer,account text,value real,price real,quantity real,barcode text,entry_expair text,description text,name text,employee_name text,entry_date text,reverse bool)")
-	db.Exec("create table if not exists inventory (date text,account text,price real,quantity real,barcode text,entry_expair text,name text,employee_name text,entry_date text)")
+	db.Exec("create table if not exists inventory (date text,entry_number integer,account text,price real,quantity real,quantity_remaining real,adjusted_cost real,barcode text,entry_expair text,name text,employee_name text,entry_date text)")
 	// defer db.Close()s
 	// defer insert.Close()
 
@@ -540,13 +538,59 @@ func journal_entry(array_of_entry []Account_value_quantity_barcode, auto_complet
 
 func financial_statements(start_date, end_date time.Time, remove_empties bool) ([]statement, []statement) {
 	start_date, end_date = check_dates(dates(start_date), dates(end_date))
-	tx, _ := db.Begin()
-	journal := qframe.ReadSQL(tx, qsql.Query("select date,entry_number,account,value,quantity from journal"))
-	journal_before := journal.Filter(qframe.And(qframe.Filter{Column: "date", Comparator: "<", Arg: start_date.String()})).Drop("date", "entry_number", "entry_expair")
-	journal_after := journal.Filter(qframe.And(qframe.Filter{Column: "date", Comparator: ">=", Arg: start_date.String()}, qframe.Filter{Column: "date", Comparator: "<=", Arg: end_date.String()})).Drop("date", "entry_number", "entry_expair")
-	retained_earnings := journal_before.Filter(qframe.And(qframe.Filter{Column: "account", Comparator: "=", Arg: temporary_debit_accounts})).Drop("date", "entry_number", "entry_expair")
-	fmt.Println(retained_earnings, journal_after)
+	rows, _ := db.Query("select date,entry_number,account,value,quantity from journal")
+	var journal []journal_tag
+	for rows.Next() {
+		var tag journal_tag
+		rows.Scan(&tag.date, &tag.entry_number, &tag.account, &tag.value, &tag.quantity)
+		journal = append(journal, tag)
+	}
+
+	retained_earnings := journal_tag{account: "retained_earnings"}
+	var cash_entry []int
+	g := map[string]*journal_tag{}
+	for _, entry := range journal {
+		k := entry.account
+		sums := g[k]
+		if sums == nil {
+			sums = &journal_tag{}
+			g[k] = sums
+		}
+		date, _ := time.Parse("2006-01-02 15:04:05.999999999 -0700 MST", entry.date)
+		if date.Before(start_date) {
+			switch {
+			case is_in(entry.account, revenues):
+				retained_earnings.value += entry.value
+			case is_in(entry.account, temporary_debit_accounts):
+				retained_earnings.value -= entry.value
+			default:
+				sums.value += entry.value
+				sums.quantity += entry.quantity
+			}
+		} else if date.Before(end_date) {
+			sums.value += entry.value
+			sums.quantity += entry.quantity
+			if is_in(entry.account, cash_and_cash_equivalent) {
+				cash_entry = append(cash_entry, entry.entry_number)
+				fmt.Println("yes")
+			}
+		}
+	}
 	var balance_sheet, cash_flow []statement
+	journal = []journal_tag{}
+	for k, v := range g {
+		journal = append(journal, journal_tag{
+			account:  k,
+			value:    v.value,
+			price:    v.value / v.quantity,
+			quantity: v.quantity,
+		})
+	}
+
+	for _, i := range journal {
+		fmt.Println(i)
+	}
+	fmt.Println(retained_earnings, cash_entry)
 	return balance_sheet, cash_flow
 }
 
@@ -813,7 +857,7 @@ func main() {
 	// 	fmt.Println(i)
 	// }
 
-	balance_sheet, cash_flow := financial_statements(time.Date(202, time.May, 21, 13, 00, 00, 00, time.Local), time.Date(2021, time.May, 20, 13, 00, 00, 00, time.Local), true)
+	balance_sheet, cash_flow := financial_statements(time.Date(202, time.May, 20, 13, 00, 00, 00, time.Local), time.Date(2024, time.May, 20, 13, 00, 00, 00, time.Local), true)
 	for _, i := range balance_sheet {
 		fmt.Println(i)
 	}
