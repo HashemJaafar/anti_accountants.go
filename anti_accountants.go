@@ -283,33 +283,35 @@ func journal_entry(array_of_entry []Account_value_quantity_barcode, auto_complet
 		db.Exec("delete from journal where reverse=True and date>?", now.String())
 	}
 
-	if auto_completion {
-		var total_invoice_before_invoice_discount float64
-		var costs float64
-		for index, entry := range array_of_entry {
-			quantity := math.Abs(entry.quantity)
-			if is_in(entry.Account, inventory) && entry.quantity < 0 {
-				if is_in(entry.Account, fifo) || is_in(entry.Account, wma) {
-					costs = cost_flow(entry.Account, entry.quantity, entry.barcode, "asc", false)
-				} else if is_in(entry.Account, lifo) {
-					costs = cost_flow(entry.Account, entry.quantity, entry.barcode, "desc", false)
-				} else {
-					continue
-				}
-				array_of_entry[index] = Account_value_quantity_barcode{entry.Account, -costs, -quantity, entry.barcode}
+	var total_invoice_before_invoice_discount float64
+	var costs float64
+	for index, entry := range array_of_entry {
+		quantity := math.Abs(entry.quantity)
+		switch {
+		case is_in(entry.Account, inventory) && entry.quantity < 0:
+			switch {
+			case is_in(entry.Account, fifo) || is_in(entry.Account, wma):
+				costs = cost_flow(entry.Account, entry.quantity, entry.barcode, "asc", false)
+			case is_in(entry.Account, lifo):
+				costs = cost_flow(entry.Account, entry.quantity, entry.barcode, "desc", false)
+			default:
+				continue
+			}
+			array_of_entry[index] = Account_value_quantity_barcode{entry.Account, -costs, -quantity, entry.barcode}
+			if auto_completion {
 				array_of_entry = append(array_of_entry, Account_value_quantity_barcode{"cost of " + entry.Account, costs, quantity, entry.barcode})
 				array_of_entry = append(array_of_entry, price_discount_tax_list(entry.Account, quantity)...)
-			} else if is_in(entry.Account, service) {
-				array_of_entry = append(array_of_entry[:index], array_of_entry[index+1:]...)
-				array_of_entry = append(array_of_entry, price_discount_tax_list(entry.Account, quantity)...)
 			}
-			if is_in(entry.Account, revenues) {
-				total_invoice_before_invoice_discount += entry.value
-			}
-			if is_in(entry.Account, discounts) {
-				total_invoice_before_invoice_discount -= entry.value
-			}
+		case auto_completion && is_in(entry.Account, service):
+			array_of_entry = append(array_of_entry[:index], array_of_entry[index+1:]...)
+			array_of_entry = append(array_of_entry, price_discount_tax_list(entry.Account, quantity)...)
+		case auto_completion && is_in(entry.Account, revenues):
+			total_invoice_before_invoice_discount += entry.value
+		case auto_completion && is_in(entry.Account, discounts):
+			total_invoice_before_invoice_discount -= entry.value
 		}
+	}
+	if auto_completion {
 		var discount float64
 		var tax float64
 		for _, i := range invoice_discounts_tax_list {
@@ -802,7 +804,7 @@ func main() {
 		Expenses:                   []directory_account{{[]uint{3, 4}, "tax of service revenue"}, {[]uint{3, 2}, "expair_expenses"}, {[]uint{3, 3}, "cost of book"}, {[]uint{3, 5}, "tax of book"}},
 	}
 	v.initialize()
-	// entry, invoice, t, entry_number := journal_entry([]Account_value_quantity_barcode{{"book", 10, -10, ""}, {"cash", 90, 90, ""}}, true, 0 /*uint(entry_number())-1*/, time.Time{},
+	// entry, invoice, t, entry_number := journal_entry([]Account_value_quantity_barcode{{"book", 10, -10, ""}, {"cash", 10, 10, ""}}, false, 0 /*uint(entry_number())-1*/, time.Time{},
 	// 	time.Time{}, "", "", "yasa", "hashem", []day_start_end{})
 
 	// fmt.Println(invoice, t, entry_number)
