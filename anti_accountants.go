@@ -47,10 +47,10 @@ type directory_account struct {
 }
 
 type Financial_accounting struct {
-	Company_name               string
-	Discount                   float64
-	Invoice_discounts_tax_list [][3]float64
-	Fifo, Lifo, Wma, Service   []directory_account_price_discount_tax
+	DriverName, DataSourceName, Company_name string
+	Discount                                 float64
+	Invoice_discounts_tax_list               [][3]float64
+	Fifo, Lifo, Wma, Service                 []directory_account_price_discount_tax
 	Assets_normal, Cash_and_cash_equivalent, Assets_contra, Liabilities_normal, Liabilities_contra,
 	Equity_normal, Equity_contra, Withdrawals, Revenues, Discounts, Expenses []directory_account
 }
@@ -105,14 +105,7 @@ var (
 )
 
 func (s Financial_accounting) initialize() {
-	// cfg := mysql.Config{
-	// 	User:   "hashem",
-	// 	Passwd: "hashem",
-	// 	Net:    "tcp",
-	// 	Addr:   "localhost",
-	// 	DBName: s.Company_name,
-	// }
-	db, _ = sql.Open("mysql", "hashem:hashem@tcp(localhost)/")
+	db, _ = sql.Open(s.DriverName, s.DataSourceName)
 	err = db.Ping()
 	error_fatal(err)
 	db.Exec("create database if not exists " + s.Company_name)
@@ -120,8 +113,6 @@ func (s Financial_accounting) initialize() {
 	error_fatal(err)
 	db.Exec("create table if not exists journal (date text,entry_number integer,account text,value real,price real,quantity real,barcode text,entry_expair text,description text,name text,employee_name text,entry_date text,reverse bool)")
 	db.Exec("create table if not exists inventory (date text,entry_number integer,account text,price real,quantity real,quantity_remaining real,adjusted_cost real,barcode text,entry_expair text,name text,employee_name text,entry_date text)")
-	// defer db.Close()s
-	// defer insert.Close()
 
 	price_discount_tax = concat(s.Fifo, s.Lifo, s.Wma, s.Service).([]directory_account_price_discount_tax)
 	for index, i := range price_discount_tax {
@@ -547,50 +538,91 @@ func financial_statements(start_date, end_date time.Time, remove_empties bool) (
 	}
 
 	retained_earnings := journal_tag{account: "retained_earnings"}
-	var cash_entry []int
-	g := map[string]*journal_tag{}
+	var cash []journal_tag
+	var number int
+	var ok bool
+	journal_map := map[string]*journal_tag{}
+	cash_map := map[string]*journal_tag{}
 	for _, entry := range journal {
-		k := entry.account
-		sums := g[k]
-		if sums == nil {
-			sums = &journal_tag{}
-			g[k] = sums
+		key_journal := entry.account
+		sum_journal := journal_map[key_journal]
+		if sum_journal == nil {
+			sum_journal = &journal_tag{}
+			journal_map[key_journal] = sum_journal
 		}
-		date, _ := time.Parse("2006-01-02 15:04:05.999999999 -0700 MST", entry.date)
-		if date.Before(start_date) {
-			switch {
-			case is_in(entry.account, revenues):
-				retained_earnings.value += entry.value
-			case is_in(entry.account, temporary_debit_accounts):
-				retained_earnings.value -= entry.value
-			default:
-				sums.value += entry.value
-				sums.quantity += entry.quantity
+		if number != entry.entry_number {
+			if ok {
+				for _, entry := range cash {
+					key_cash := entry.account
+					sum_cash := cash_map[key_cash]
+					if sum_cash == nil {
+						sum_cash = &journal_tag{}
+						cash_map[key_cash] = sum_cash
+					}
+					if is_in(entry.account, credit_accounts) {
+						sum_cash.value += entry.value
+						sum_cash.quantity += entry.quantity
+					} else {
+						sum_cash.value -= entry.value
+						sum_cash.quantity -= entry.quantity
+					}
+				}
 			}
-		} else if date.Before(end_date) {
-			sums.value += entry.value
-			sums.quantity += entry.quantity
+			cash = []journal_tag{}
+			ok = false
+		}
+		date, _ := time.Parse("2006-01-02 15:04:05.999999999 -0700 +03 m=+0.99999999", entry.date)
+		before := date.Before(start_date)
+		number = entry.entry_number
+		switch {
+		case before && is_in(entry.account, revenues):
+			retained_earnings.value += entry.value
+		case before && is_in(entry.account, temporary_debit_accounts):
+			retained_earnings.value -= entry.value
+		case before:
+			sum_journal.value += entry.value
+			sum_journal.quantity += entry.quantity
+		case date.Before(end_date):
+			sum_journal.value += entry.value
+			sum_journal.quantity += entry.quantity
 			if is_in(entry.account, cash_and_cash_equivalent) {
-				cash_entry = append(cash_entry, entry.entry_number)
-				fmt.Println("yes")
+				ok = true
+			} else {
+				cash = append(cash, entry)
 			}
 		}
 	}
 	var balance_sheet, cash_flow []statement
+
 	journal = []journal_tag{}
-	for k, v := range g {
+	for key, v := range journal_map {
 		journal = append(journal, journal_tag{
-			account:  k,
+			account:  key,
 			value:    v.value,
 			price:    v.value / v.quantity,
 			quantity: v.quantity,
 		})
 	}
-
+	journal = append(journal, retained_earnings)
 	for _, i := range journal {
 		fmt.Println(i)
 	}
-	fmt.Println(retained_earnings, cash_entry)
+
+	fmt.Println("##################")
+
+	cash = []journal_tag{}
+	for key, v := range cash_map {
+		cash = append(cash, journal_tag{
+			account:  key,
+			value:    v.value,
+			price:    v.value / v.quantity,
+			quantity: v.quantity,
+		})
+	}
+	for _, i := range cash {
+		fmt.Println(i)
+	}
+
 	return balance_sheet, cash_flow
 }
 
@@ -829,6 +861,8 @@ func transpose(slice [][]journal_tag) [][]journal_tag {
 
 func main() {
 	v := Financial_accounting{
+		DriverName:                 "mysql",
+		DataSourceName:             "hashem:hashem@tcp(localhost)/",
 		Company_name:               "hashem2",
 		Discount:                   0,
 		Invoice_discounts_tax_list: [][3]float64{{5, -10, 0}, {50, -5, -5}},
@@ -857,7 +891,7 @@ func main() {
 	// 	fmt.Println(i)
 	// }
 
-	balance_sheet, cash_flow := financial_statements(time.Date(202, time.May, 20, 13, 00, 00, 00, time.Local), time.Date(2024, time.May, 20, 13, 00, 00, 00, time.Local), true)
+	balance_sheet, cash_flow := financial_statements(time.Date(2021, time.May, 20, 13, 00, 00, 00, time.Local), time.Date(2022, time.May, 20, 13, 00, 00, 00, time.Local), true)
 	for _, i := range balance_sheet {
 		fmt.Println(i)
 	}
