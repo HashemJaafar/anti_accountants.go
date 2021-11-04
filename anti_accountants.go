@@ -84,9 +84,9 @@ type invoice_tag struct {
 type statement struct {
 	directory_no []uint
 	account      string
-	value, price, quantity, analysis,
-	budget_value, budget_price, budget_quantity, budget_analysis,
-	difference float64
+	value, price, quantity, percent,
+	base_value, base_price, base_quantity, base_percent,
+	difference, difference_percent float64
 }
 
 var (
@@ -527,8 +527,10 @@ func journal_entry(array_of_entry []Account_value_quantity_barcode, auto_complet
 	return array_to_insert, invoice, now, entry_number
 }
 
-func financial_statements(start_date, end_date time.Time, remove_empties bool) ([]statement, []statement) {
+func financial_statements(start_base_date, end_base_date, start_date, end_date time.Time, remove_empties bool) ([]statement, []statement) {
 	start_date, end_date = check_dates(dates(start_date), dates(end_date))
+	check_dates(dates(end_base_date), dates(start_date))
+	start_base_date, end_base_date = check_dates(dates(start_base_date), dates(end_base_date))
 	rows, _ := db.Query("select date,entry_number,account,value,quantity from journal")
 	var journal []journal_tag
 	for rows.Next() {
@@ -537,17 +539,17 @@ func financial_statements(start_date, end_date time.Time, remove_empties bool) (
 		journal = append(journal, tag)
 	}
 
-	retained_earnings := journal_tag{account: "retained_earnings"}
+	retained_earnings := statement{account: "retained_earnings"}
 	var cash []journal_tag
 	var number int
 	var ok bool
-	journal_map := map[string]*journal_tag{}
-	cash_map := map[string]*journal_tag{}
+	journal_map := map[string]*statement{}
+	cash_map := map[string]*statement{}
 	for _, entry := range journal {
 		key_journal := entry.account
 		sum_journal := journal_map[key_journal]
 		if sum_journal == nil {
-			sum_journal = &journal_tag{}
+			sum_journal = &statement{}
 			journal_map[key_journal] = sum_journal
 		}
 		if number != entry.entry_number {
@@ -556,7 +558,7 @@ func financial_statements(start_date, end_date time.Time, remove_empties bool) (
 					key_cash := entry.account
 					sum_cash := cash_map[key_cash]
 					if sum_cash == nil {
-						sum_cash = &journal_tag{}
+						sum_cash = &statement{}
 						cash_map[key_cash] = sum_cash
 					}
 					if is_in(entry.account, credit_accounts) {
@@ -572,17 +574,44 @@ func financial_statements(start_date, end_date time.Time, remove_empties bool) (
 			ok = false
 		}
 		date, _ := time.Parse("2006-01-02 15:04:05.999999999 -0700 +03 m=+0.99999999", entry.date)
-		before := date.Before(start_date)
+		before_base_period := date.Before(start_base_date)
+		in_base_period := date.After(start_base_date) && date.Before(end_base_date)
+		before_period := date.Before(start_date)
+		in_period := date.After(start_date) && date.Before(end_date)
 		number = entry.entry_number
-		switch {
-		case before && is_in(entry.account, revenues):
-			retained_earnings.value += entry.value
-		case before && is_in(entry.account, temporary_debit_accounts):
-			retained_earnings.value -= entry.value
-		case before:
-			sum_journal.value += entry.value
-			sum_journal.quantity += entry.quantity
-		case date.Before(end_date):
+
+		if before_base_period {
+			switch {
+			case is_in(entry.account, revenues):
+				retained_earnings.base_value += entry.value
+			case is_in(entry.account, temporary_debit_accounts):
+				retained_earnings.base_value -= entry.value
+			default:
+				sum_journal.base_value += entry.value
+				sum_journal.base_quantity += entry.quantity
+			}
+		}
+		if in_base_period {
+			sum_journal.base_value += entry.value
+			sum_journal.base_quantity += entry.quantity
+			if is_in(entry.account, cash_and_cash_equivalent) {
+				ok = true
+			} else {
+				cash = append(cash, entry)
+			}
+		}
+		if before_period {
+			switch {
+			case is_in(entry.account, revenues):
+				retained_earnings.value += entry.value
+			case is_in(entry.account, temporary_debit_accounts):
+				retained_earnings.value -= entry.value
+			default:
+				sum_journal.value += entry.value
+				sum_journal.quantity += entry.quantity
+			}
+		}
+		if in_period {
 			sum_journal.value += entry.value
 			sum_journal.quantity += entry.quantity
 			if is_in(entry.account, cash_and_cash_equivalent) {
@@ -592,35 +621,42 @@ func financial_statements(start_date, end_date time.Time, remove_empties bool) (
 			}
 		}
 	}
-	var balance_sheet, cash_flow []statement
 
-	journal = []journal_tag{}
+	balance_sheet := []statement{}
 	for key, v := range journal_map {
-		journal = append(journal, journal_tag{
-			account:  key,
-			value:    v.value,
-			price:    v.value / v.quantity,
-			quantity: v.quantity,
+		balance_sheet = append(balance_sheet, statement{
+			directory_no:       []uint{},
+			account:            key,
+			value:              v.value,
+			price:              v.value / v.quantity,
+			quantity:           v.quantity,
+			percent:            0,
+			base_value:         v.base_value,
+			base_price:         v.base_value / v.base_quantity,
+			base_quantity:      v.base_quantity,
+			base_percent:       0,
+			difference:         v.value - v.base_value,
+			difference_percent: (v.value - v.base_value) / v.base_value,
 		})
 	}
-	journal = append(journal, retained_earnings)
-	for _, i := range journal {
-		fmt.Println(i)
-	}
+	balance_sheet = append(balance_sheet, retained_earnings)
 
-	fmt.Println("##################")
-
-	cash = []journal_tag{}
+	cash_flow := []statement{}
 	for key, v := range cash_map {
-		cash = append(cash, journal_tag{
-			account:  key,
-			value:    v.value,
-			price:    v.value / v.quantity,
-			quantity: v.quantity,
+		cash_flow = append(cash_flow, statement{
+			directory_no:       []uint{},
+			account:            key,
+			value:              v.value,
+			price:              v.value / v.quantity,
+			quantity:           v.quantity,
+			percent:            0,
+			base_value:         v.base_value,
+			base_price:         v.base_value / v.base_quantity,
+			base_quantity:      v.base_quantity,
+			base_percent:       0,
+			difference:         v.value - v.base_value,
+			difference_percent: (v.value - v.base_value) / v.base_value,
 		})
-	}
-	for _, i := range cash {
-		fmt.Println(i)
 	}
 
 	return balance_sheet, cash_flow
@@ -891,10 +927,16 @@ func main() {
 	// 	fmt.Println(i)
 	// }
 
-	balance_sheet, cash_flow := financial_statements(time.Date(2021, time.May, 20, 13, 00, 00, 00, time.Local), time.Date(2022, time.May, 20, 13, 00, 00, 00, time.Local), true)
+	balance_sheet, cash_flow := financial_statements(
+		time.Date(2020, time.May, 20, 13, 00, 00, 00, time.Local),
+		time.Date(2021, time.May, 20, 13, 00, 00, 00, time.Local),
+		time.Date(2021, time.May, 20, 13, 00, 00, 00, time.Local),
+		time.Date(2022, time.May, 20, 13, 00, 00, 00, time.Local),
+		true)
 	for _, i := range balance_sheet {
 		fmt.Println(i)
 	}
+	fmt.Println("##################################################################### cash_flow #####################################################################")
 	for _, i := range cash_flow {
 		fmt.Println(i)
 	}
