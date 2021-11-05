@@ -193,30 +193,14 @@ func (s Financial_accounting) initialize() {
 		accounts_directory1(s.Equity_normal),
 		accounts_directory1(s.Equity_contra),
 		accounts_directory1(s.Withdrawals),
+		accounts_directory1(s.Sales),
 		accounts_directory1(s.Revenues),
 		accounts_directory1(s.Discounts),
+		accounts_directory1(s.Sales_returns_and_allowances),
 		accounts_directory1(s.Expenses)).([][]uint)
 
 	check_if_duplicates_directory(all_directorys)
 	check_if_duplicates(all_accounts)
-
-	all_directory_account = concat(
-		directory_account_slice(s.Fifo),
-		directory_account_slice(s.Lifo),
-		directory_account_slice(s.Wma),
-		directory_account_slice(s.Service),
-		s.retained_earnings[:],
-		s.Assets_normal,
-		s.Cash_and_cash_equivalent,
-		s.Assets_contra,
-		s.Liabilities_normal,
-		s.Liabilities_contra,
-		s.Equity_normal,
-		s.Equity_contra,
-		s.Withdrawals,
-		s.Revenues,
-		s.Discounts,
-		s.Expenses).([]directory_account)
 
 	for _, directory := range all_directorys {
 		l := len(directory)
@@ -233,6 +217,26 @@ func (s Financial_accounting) initialize() {
 			}
 		}
 	}
+
+	all_directory_account = concat(
+		directory_account_slice(s.Fifo),
+		directory_account_slice(s.Lifo),
+		directory_account_slice(s.Wma),
+		directory_account_slice(s.Service),
+		s.retained_earnings[:],
+		s.Assets_normal,
+		s.Cash_and_cash_equivalent,
+		s.Assets_contra,
+		s.Liabilities_normal,
+		s.Liabilities_contra,
+		s.Equity_normal,
+		s.Equity_contra,
+		s.Withdrawals,
+		s.Sales,
+		s.Revenues,
+		s.Discounts,
+		s.Sales_returns_and_allowances,
+		s.Expenses).([]directory_account)
 }
 
 func journal_entry(array_of_entry []Account_value_quantity_barcode, auto_completion bool, entry_to_correct uint, date time.Time, entry_expair time.Time, adjusting_method string,
