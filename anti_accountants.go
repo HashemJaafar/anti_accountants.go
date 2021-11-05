@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"os"
 	"reflect"
 	"strconv"
 	"strings"
+	"text/tabwriter"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -292,8 +294,8 @@ func journal_entry(array_of_entry []Account_value_quantity_barcode, auto_complet
 				array_of_entry = append(array_of_entry, price_discount_tax_list(array_of_entry[index].Account, quantity)...)
 			}
 		case auto_completion && is_in(array_of_entry[index].Account, service):
-			array_of_entry = append(array_of_entry[:index], array_of_entry[index+1:]...)
 			array_of_entry = append(array_of_entry, price_discount_tax_list(array_of_entry[index].Account, quantity)...)
+			array_of_entry = append(array_of_entry[:index], array_of_entry[index+1:]...)
 			total_invoice_before_invoice_discount += array_of_entry[index].value
 		case auto_completion && is_in(array_of_entry[index].Account, revenues):
 			total_invoice_before_invoice_discount += array_of_entry[index].value
@@ -540,9 +542,9 @@ func financial_statements(start_base_date, end_base_date, start_date, end_date t
 	}
 
 	retained_earnings := statement{account: "retained_earnings"}
-	var cash []journal_tag
+	var cash, cash_base []journal_tag
 	var number int
-	var ok bool
+	var ok, ok_base bool
 	journal_map := map[string]*statement{}
 	cash_map := map[string]*statement{}
 	for _, entry := range journal {
@@ -570,8 +572,27 @@ func financial_statements(start_base_date, end_base_date, start_date, end_date t
 					}
 				}
 			}
+			if ok_base {
+				for _, entry := range cash {
+					key_cash := entry.account
+					sum_cash := cash_map[key_cash]
+					if sum_cash == nil {
+						sum_cash = &statement{}
+						cash_map[key_cash] = sum_cash
+					}
+					if is_in(entry.account, credit_accounts) {
+						sum_cash.base_value += entry.value
+						sum_cash.base_quantity += entry.quantity
+					} else {
+						sum_cash.base_value -= entry.value
+						sum_cash.base_quantity -= entry.quantity
+					}
+				}
+			}
 			cash = []journal_tag{}
+			cash_base = []journal_tag{}
 			ok = false
+			ok_base = false
 		}
 		date, _ := time.Parse("2006-01-02 15:04:05.999999999 -0700 +03 m=+0.99999999", entry.date)
 		before_base_period := date.Before(start_base_date)
@@ -595,9 +616,9 @@ func financial_statements(start_base_date, end_base_date, start_date, end_date t
 			sum_journal.base_value += entry.value
 			sum_journal.base_quantity += entry.quantity
 			if is_in(entry.account, cash_and_cash_equivalent) {
-				ok = true
+				ok_base = true
 			} else {
-				cash = append(cash, entry)
+				cash_base = append(cash_base, entry)
 			}
 		}
 		if before_period {
@@ -919,25 +940,30 @@ func main() {
 		Expenses:                   []directory_account{{[]uint{3, 4}, "tax of service revenue"}, {[]uint{3, 2}, "expair_expenses"}, {[]uint{3, 3}, "cost of book"}, {[]uint{3, 5}, "tax of book"}, {[]uint{3, 8}, "invoice tax"}},
 	}
 	v.initialize()
-	// entry, invoice, t, entry_number := journal_entry([]Account_value_quantity_barcode{{"cash", 85, 85, ""}, {"book", 10, -10, ""}}, true, 0 /*uint(entry_number())-1*/, time.Time{},
-	// 	time.Time{}, "", "", "yasa", "hashem", []day_start_end{})
+	entry, invoice, t, entry_number := journal_entry([]Account_value_quantity_barcode{{"cash", 9995, 9995, ""}, {"service revenue", 10, -10000, ""}}, true, 0 /*uint(entry_number())-1*/, time.Date(2020, time.May, 20, 13, 00, 00, 00, time.Local),
+		time.Date(2020, time.May, 20, 13, 00, 00, 00, time.Local), "linear", "", "yasa", "hashem", []day_start_end{})
 
-	// fmt.Println(invoice, t, entry_number)
-	// for _, i := range entry {
-	// 	fmt.Println(i)
+	fmt.Println(invoice, t, entry_number)
+	r := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
+	for _, i := range entry {
+		fmt.Fprintln(r, "\t", i.date, "\t", i.entry_number, "\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.barcode, "\t", i.entry_expair, "\t", i.description, "\t", i.name, "\t", i.employee_name, "\t", i.entry_date, "\t", i.reverse)
+	}
+	r.Flush()
+
+	// balance_sheet, cash_flow := financial_statements(
+	// 	time.Date(2020, time.May, 20, 13, 00, 00, 00, time.Local),
+	// 	time.Date(2021, time.May, 20, 13, 00, 00, 00, time.Local),
+	// 	time.Date(2022, time.May, 20, 13, 00, 00, 00, time.Local),
+	// 	time.Date(2022, time.May, 20, 13, 00, 00, 00, time.Local),
+	// 	true)
+
+	// w := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
+	// for _, i := range balance_sheet {
+	// 	fmt.Fprintln(w, i.directory_no, "\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.percent, "\t", i.base_value, "\t", i.base_price, "\t", i.base_quantity, "\t", i.base_percent, "\t", i.difference, "\t", i.difference_percent, "\t")
 	// }
-
-	balance_sheet, cash_flow := financial_statements(
-		time.Date(2020, time.May, 20, 13, 00, 00, 00, time.Local),
-		time.Date(2021, time.May, 20, 13, 00, 00, 00, time.Local),
-		time.Date(2021, time.May, 20, 13, 00, 00, 00, time.Local),
-		time.Date(2022, time.May, 20, 13, 00, 00, 00, time.Local),
-		true)
-	for _, i := range balance_sheet {
-		fmt.Println(i)
-	}
-	fmt.Println("##################################################################### cash_flow #####################################################################")
-	for _, i := range cash_flow {
-		fmt.Println(i)
-	}
+	// fmt.Fprintln(w, "##################################################################### cash_flow #####################################################################")
+	// for _, i := range cash_flow {
+	// 	fmt.Fprintln(w, i.directory_no, "\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.percent, "\t", i.base_value, "\t", i.base_price, "\t", i.base_quantity, "\t", i.base_percent, "\t", i.difference, "\t", i.difference_percent, "\t")
+	// }
+	// w.Flush()
 }
