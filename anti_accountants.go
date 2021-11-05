@@ -49,12 +49,11 @@ type directory_account struct {
 }
 
 type Financial_accounting struct {
-	DriverName, DataSourceName, Company_name               string
-	Discount                                               float64
-	Invoice_discounts_tax_list                             [][3]float64
-	Assets_normal_directory_no, Assets_contra_directory_no []uint
-	Fifo, Lifo, Wma, Service                               []directory_account_price_discount_tax
-	retained_earnings                                      [1]directory_account
+	DriverName, DataSourceName, Company_name string
+	Discount                                 float64
+	Invoice_discounts_tax_list               [][3]float64
+	Fifo, Lifo, Wma, Service                 []directory_account_price_discount_tax
+	retained_earnings                        [1]directory_account
 	Assets_normal, Cash_and_cash_equivalent, Assets_contra, Liabilities_normal, Liabilities_contra,
 	Equity_normal, Equity_contra, Withdrawals, Revenues, Discounts, Expenses []directory_account
 }
@@ -90,7 +89,7 @@ type statement struct {
 	account      string
 	value, price, quantity, percent,
 	base_value, base_price, base_quantity, base_percent,
-	difference, difference_percent float64
+	changes_since_base_period, current_period_in_relation_to_base_period float64
 }
 
 var (
@@ -581,6 +580,7 @@ func (s Financial_accounting) financial_statements(start_base_date, end_base_dat
 	var cash, cash_base []journal_tag
 	var number int
 	var ok, ok_base bool
+	var assets, assets_base, cash_increase, cash_increase_base float64
 	journal_map := map[string]*statement{}
 	cash_map := map[string]*statement{}
 	for _, entry := range journal {
@@ -591,6 +591,25 @@ func (s Financial_accounting) financial_statements(start_base_date, end_base_dat
 			journal_map[key_journal] = sum_journal
 		}
 		if number != entry.entry_number {
+			if ok_base {
+				for _, entry := range cash_base {
+					key_cash := entry.account
+					sum_cash := cash_map[key_cash]
+					if sum_cash == nil {
+						sum_cash = &statement{}
+						cash_map[key_cash] = sum_cash
+					}
+					if is_in(entry.account, credit_accounts) {
+						sum_cash.base_value += entry.value
+						sum_cash.base_quantity += entry.quantity
+						cash_increase_base += entry.value
+					} else {
+						sum_cash.base_value -= entry.value
+						sum_cash.base_quantity -= entry.quantity
+						cash_increase_base -= entry.value
+					}
+				}
+			}
 			if ok {
 				for _, entry := range cash {
 					key_cash := entry.account
@@ -602,33 +621,18 @@ func (s Financial_accounting) financial_statements(start_base_date, end_base_dat
 					if is_in(entry.account, credit_accounts) {
 						sum_cash.value += entry.value
 						sum_cash.quantity += entry.quantity
+						cash_increase += entry.value
 					} else {
 						sum_cash.value -= entry.value
 						sum_cash.quantity -= entry.quantity
+						cash_increase -= entry.value
 					}
 				}
 			}
-			if ok_base {
-				for _, entry := range cash {
-					key_cash := entry.account
-					sum_cash := cash_map[key_cash]
-					if sum_cash == nil {
-						sum_cash = &statement{}
-						cash_map[key_cash] = sum_cash
-					}
-					if is_in(entry.account, credit_accounts) {
-						sum_cash.base_value += entry.value
-						sum_cash.base_quantity += entry.quantity
-					} else {
-						sum_cash.base_value -= entry.value
-						sum_cash.base_quantity -= entry.quantity
-					}
-				}
-			}
-			cash = []journal_tag{}
 			cash_base = []journal_tag{}
-			ok = false
+			cash = []journal_tag{}
 			ok_base = false
+			ok = false
 		}
 		date, _ := time.Parse("2006-01-02 15:04:05.999999999 -0700 +03 m=+0.99999999", entry.date)
 		before_base_period := date.Before(start_base_date)
@@ -636,6 +640,19 @@ func (s Financial_accounting) financial_statements(start_base_date, end_base_dat
 		before_period := date.Before(start_date)
 		in_period := date.After(start_date) && date.Before(end_date)
 		number = entry.entry_number
+
+		if before_base_period || in_base_period {
+			if is_in(entry.account, assets_normal) {
+				assets_base += entry.value
+			} else if is_in(entry.account, assets_contra) {
+				assets_base -= entry.value
+			}
+		}
+		if is_in(entry.account, assets_normal) {
+			assets += entry.value
+		} else if is_in(entry.account, assets_contra) {
+			assets -= entry.value
+		}
 
 		if before_base_period {
 			switch {
@@ -678,8 +695,8 @@ func (s Financial_accounting) financial_statements(start_base_date, end_base_dat
 			}
 		}
 	}
-	balance_sheet := append(prepare_statement(journal_map), retained_earnings)
-	cash_flow := prepare_statement(cash_map)
+	balance_sheet := append(prepare_statement(journal_map, assets, assets_base), retained_earnings)
+	cash_flow := prepare_statement(cash_map, cash_increase, cash_increase_base)
 
 	return balance_sheet, cash_flow
 }
@@ -776,7 +793,7 @@ func entry_number() int {
 	return tag + 1
 }
 
-func prepare_statement(journal_map map[string]*statement) []statement {
+func prepare_statement(journal_map map[string]*statement, amount, amount_base float64) []statement {
 	statement_sheet := []statement{}
 	for key, v := range journal_map {
 		var directory []uint
@@ -787,18 +804,18 @@ func prepare_statement(journal_map map[string]*statement) []statement {
 			}
 		}
 		statement_sheet = append(statement_sheet, statement{
-			directory_no:       directory,
-			account:            key,
-			value:              v.value,
-			price:              v.value / v.quantity,
-			quantity:           v.quantity,
-			percent:            0,
-			base_value:         v.base_value,
-			base_price:         v.base_value / v.base_quantity,
-			base_quantity:      v.base_quantity,
-			base_percent:       0,
-			difference:         v.value - v.base_value,
-			difference_percent: (v.value - v.base_value) / v.base_value,
+			directory_no:              directory,
+			account:                   key,
+			value:                     v.value,
+			price:                     v.value / v.quantity,
+			quantity:                  v.quantity,
+			percent:                   v.value / amount,
+			base_value:                v.base_value,
+			base_price:                v.base_value / v.base_quantity,
+			base_quantity:             v.base_quantity,
+			base_percent:              v.base_value / amount_base,
+			changes_since_base_period: v.value - v.base_value,
+			current_period_in_relation_to_base_period: v.value / v.base_value,
 		})
 	}
 	return statement_sheet
@@ -952,8 +969,6 @@ func main() {
 		Company_name:               "hashem2",
 		Discount:                   0,
 		Invoice_discounts_tax_list: [][3]float64{{5, -10, 0}, {50, -5, -5}},
-		Assets_normal_directory_no: []uint{},
-		Assets_contra_directory_no: []uint{},
 		Fifo:                       []directory_account_price_discount_tax{{[]uint{1, 3, 1}, "book1", 15, 0, 0}},
 		Lifo:                       []directory_account_price_discount_tax{{[]uint{1, 3, 2}, "book2", 15, 0, 0}},
 		Wma:                        []directory_account_price_discount_tax{{[]uint{1, 3, 3}, "book", 10, -1, -1}},
@@ -991,11 +1006,11 @@ func main() {
 
 	w := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
 	for _, i := range balance_sheet {
-		fmt.Fprintln(w, i.directory_no, "\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.percent, "\t", i.base_value, "\t", i.base_price, "\t", i.base_quantity, "\t", i.base_percent, "\t", i.difference, "\t", i.difference_percent, "\t")
+		fmt.Fprintln(w, i.directory_no, "\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.percent, "\t", i.base_value, "\t", i.base_price, "\t", i.base_quantity, "\t", i.base_percent, "\t", i.changes_since_base_period, "\t", i.current_period_in_relation_to_base_period, "\t")
 	}
 	fmt.Fprintln(w, "##################################################################### cash_flow #####################################################################")
 	for _, i := range cash_flow {
-		fmt.Fprintln(w, i.directory_no, "\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.percent, "\t", i.base_value, "\t", i.base_price, "\t", i.base_quantity, "\t", i.base_percent, "\t", i.difference, "\t", i.difference_percent, "\t")
+		fmt.Fprintln(w, i.directory_no, "\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.percent, "\t", i.base_value, "\t", i.base_price, "\t", i.base_quantity, "\t", i.base_percent, "\t", i.changes_since_base_period, "\t", i.current_period_in_relation_to_base_period, "\t")
 	}
 	w.Flush()
 }
