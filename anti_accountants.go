@@ -54,6 +54,7 @@ type Financial_accounting struct {
 	Invoice_discounts_tax_list                             [][3]float64
 	Assets_normal_directory_no, Assets_contra_directory_no []uint
 	Fifo, Lifo, Wma, Service                               []directory_account_price_discount_tax
+	retained_earnings                                      [1]directory_account
 	Assets_normal, Cash_and_cash_equivalent, Assets_contra, Liabilities_normal, Liabilities_contra,
 	Equity_normal, Equity_contra, Withdrawals, Revenues, Discounts, Expenses []directory_account
 }
@@ -139,7 +140,7 @@ func (s Financial_accounting) initialize() {
 	assets_contra = accounts_name(s.Assets_contra)
 	liabilities_normal = accounts_name(s.Liabilities_normal)
 	liabilities_contra = accounts_name(s.Liabilities_contra)
-	equity_normal = accounts_name(s.Equity_normal)
+	equity_normal = concat(accounts_name(s.Equity_normal), accounts_name(s.retained_earnings[:])).([]string)
 	equity_contra = accounts_name(s.Equity_contra)
 	withdrawals = accounts_name(s.Withdrawals)
 	revenues = concat(accounts_name(s.Revenues), service).([]string)
@@ -182,6 +183,7 @@ func (s Financial_accounting) initialize() {
 		accounts_directory(s.Lifo),
 		accounts_directory(s.Wma),
 		accounts_directory(s.Service),
+		accounts_directory1(s.retained_earnings[:]),
 		accounts_directory1(s.Assets_normal),
 		accounts_directory1(s.Cash_and_cash_equivalent),
 		accounts_directory1(s.Assets_contra),
@@ -202,6 +204,7 @@ func (s Financial_accounting) initialize() {
 		directory_account_slice(s.Lifo),
 		directory_account_slice(s.Wma),
 		directory_account_slice(s.Service),
+		s.retained_earnings[:],
 		s.Assets_normal,
 		s.Cash_and_cash_equivalent,
 		s.Assets_contra,
@@ -562,7 +565,7 @@ func journal_entry(array_of_entry []Account_value_quantity_barcode, auto_complet
 	return array_to_insert, invoice, Now, entry_number
 }
 
-func financial_statements(start_base_date, end_base_date, start_date, end_date time.Time, remove_empties bool) ([]statement, []statement) {
+func (s Financial_accounting) financial_statements(start_base_date, end_base_date, start_date, end_date time.Time, remove_empties bool) ([]statement, []statement) {
 	check_dates(start_date, end_date)
 	check_dates(end_base_date, start_date)
 	check_dates(start_base_date, end_base_date)
@@ -574,7 +577,7 @@ func financial_statements(start_base_date, end_base_date, start_date, end_date t
 		journal = append(journal, tag)
 	}
 
-	retained_earnings := statement{account: "retained_earnings"}
+	retained_earnings := statement{directory_no: s.retained_earnings[0].directory_no, account: s.retained_earnings[0].account_name}
 	var cash, cash_base []journal_tag
 	var number int
 	var ok, ok_base bool
@@ -675,43 +678,8 @@ func financial_statements(start_base_date, end_base_date, start_date, end_date t
 			}
 		}
 	}
-
-	balance_sheet := []statement{}
-	for key, v := range journal_map {
-		balance_sheet = append(balance_sheet, statement{
-			directory_no:       directory(key),
-			account:            key,
-			value:              v.value,
-			price:              v.value / v.quantity,
-			quantity:           v.quantity,
-			percent:            0,
-			base_value:         v.base_value,
-			base_price:         v.base_value / v.base_quantity,
-			base_quantity:      v.base_quantity,
-			base_percent:       0,
-			difference:         v.value - v.base_value,
-			difference_percent: (v.value - v.base_value) / v.base_value,
-		})
-	}
-	balance_sheet = append(balance_sheet, retained_earnings)
-
-	cash_flow := []statement{}
-	for key, v := range cash_map {
-		cash_flow = append(cash_flow, statement{
-			directory_no:       directory(key),
-			account:            key,
-			value:              v.value,
-			price:              v.value / v.quantity,
-			quantity:           v.quantity,
-			percent:            0,
-			base_value:         v.base_value,
-			base_price:         v.base_value / v.base_quantity,
-			base_quantity:      v.base_quantity,
-			base_percent:       0,
-			difference:         v.value - v.base_value,
-			difference_percent: (v.value - v.base_value) / v.base_value,
-		})
-	}
+	balance_sheet := append(prepare_statement(journal_map), retained_earnings)
+	cash_flow := prepare_statement(cash_map)
 
 	return balance_sheet, cash_flow
 }
@@ -808,13 +776,32 @@ func entry_number() int {
 	return tag + 1
 }
 
-func directory(account string) []uint {
-	for _, i := range all_directory_account {
-		if account == i.account_name {
-			return i.directory_no
+func prepare_statement(journal_map map[string]*statement) []statement {
+	statement_sheet := []statement{}
+	for key, v := range journal_map {
+		var directory []uint
+		for _, i := range all_directory_account {
+			if key == i.account_name {
+				directory = i.directory_no
+				break
+			}
 		}
+		statement_sheet = append(statement_sheet, statement{
+			directory_no:       directory,
+			account:            key,
+			value:              v.value,
+			price:              v.value / v.quantity,
+			quantity:           v.quantity,
+			percent:            0,
+			base_value:         v.base_value,
+			base_price:         v.base_value / v.base_quantity,
+			base_quantity:      v.base_quantity,
+			base_percent:       0,
+			difference:         v.value - v.base_value,
+			difference_percent: (v.value - v.base_value) / v.base_value,
+		})
 	}
-	return []uint{}
+	return statement_sheet
 }
 
 func is_in(element string, elements []string) bool {
@@ -965,10 +952,13 @@ func main() {
 		Company_name:               "hashem2",
 		Discount:                   0,
 		Invoice_discounts_tax_list: [][3]float64{{5, -10, 0}, {50, -5, -5}},
+		Assets_normal_directory_no: []uint{},
+		Assets_contra_directory_no: []uint{},
 		Fifo:                       []directory_account_price_discount_tax{{[]uint{1, 3, 1}, "book1", 15, 0, 0}},
 		Lifo:                       []directory_account_price_discount_tax{{[]uint{1, 3, 2}, "book2", 15, 0, 0}},
 		Wma:                        []directory_account_price_discount_tax{{[]uint{1, 3, 3}, "book", 10, -1, -1}},
 		Service:                    []directory_account_price_discount_tax{{[]uint{4, 3, 4}, "service revenue", 2, -1, -1}},
+		retained_earnings:          [1]directory_account{{[]uint{4, 4}, "retained_earnings"}},
 		Assets_normal:              []directory_account{{[]uint{1, 1}, "office equipment"}, {[]uint{1}, "Assets_normal"}, {[]uint{1, 3}, "inventory"}},
 		Cash_and_cash_equivalent:   []directory_account{{[]uint{1, 8}, "cash"}},
 		Assets_contra:              []directory_account{},
@@ -992,7 +982,7 @@ func main() {
 	// }
 	// r.Flush()
 
-	balance_sheet, cash_flow := financial_statements(
+	balance_sheet, cash_flow := v.financial_statements(
 		time.Date(2020, time.May, 20, 13, 00, 00, 00, time.Local),
 		time.Date(2020, time.May, 20, 13, 00, 00, 00, time.Local),
 		time.Date(2020, time.May, 20, 13, 00, 00, 00, time.Local),
