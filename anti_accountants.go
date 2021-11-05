@@ -55,7 +55,7 @@ type Financial_accounting struct {
 	Fifo, Lifo, Wma, Service                 []directory_account_price_discount_tax
 	retained_earnings                        [1]directory_account
 	Assets_normal, Cash_and_cash_equivalent, Assets_contra, Liabilities_normal, Liabilities_contra,
-	Equity_normal, Equity_contra, Withdrawals, Revenues, Discounts, Expenses []directory_account
+	Equity_normal, Equity_contra, Withdrawals, Sales, Revenues, Discounts, Sales_returns_and_allowances, Expenses []directory_account
 }
 
 type journal_tag struct {
@@ -94,7 +94,7 @@ type statement struct {
 
 var (
 	fifo, lifo, wma, service, inventory, assets_normal, cash_and_cash_equivalent, assets_contra, liabilities_normal, liabilities_contra, equity_normal, equity_contra,
-	withdrawals, revenues, expenses, discounts, temporary_debit_accounts, temporary_accounts, debit_accounts, credit_accounts []string
+	withdrawals, sales, revenues, sales_returns_and_allowances, expenses, discounts, temporary_debit_accounts, temporary_accounts, debit_accounts, credit_accounts []string
 	invoice_discounts_tax_list [][3]float64
 	db                         *sql.DB
 	err                        error
@@ -142,9 +142,11 @@ func (s Financial_accounting) initialize() {
 	equity_normal = concat(accounts_name(s.Equity_normal), accounts_name(s.retained_earnings[:])).([]string)
 	equity_contra = accounts_name(s.Equity_contra)
 	withdrawals = accounts_name(s.Withdrawals)
-	revenues = concat(accounts_name(s.Revenues), service).([]string)
+	sales = accounts_name(s.Sales)
+	revenues = concat(accounts_name(s.Revenues), sales, service).([]string)
 	discounts = accounts_name(s.Discounts)
-	expenses = concat(accounts_name(s.Expenses), discounts).([]string)
+	sales_returns_and_allowances = accounts_name(s.Sales_returns_and_allowances)
+	expenses = concat(accounts_name(s.Expenses), sales_returns_and_allowances, discounts).([]string)
 	temporary_debit_accounts = concat(withdrawals, expenses).([]string)
 	temporary_accounts = concat(temporary_debit_accounts, revenues).([]string)
 	debit_accounts = concat(assets_normal, liabilities_contra, equity_contra, temporary_debit_accounts).([]string)
@@ -173,7 +175,7 @@ func (s Financial_accounting) initialize() {
 	accounts := column_values("account")
 	for _, account := range accounts {
 		if !is_in(account, all_accounts) {
-			log.Fatal(account + " is not on parameters accounts lists")
+			log.Panic(account + " is not on parameters accounts lists")
 		}
 	}
 
@@ -227,7 +229,7 @@ func (s Financial_accounting) initialize() {
 				}
 			}
 			if !ok {
-				log.Fatal("this directory ", directory, " don't have parent directory like this ", directory[:l-1])
+				log.Panic("this directory ", directory, " don't have parent directory like this ", directory[:l-1])
 			}
 		}
 	}
@@ -237,7 +239,7 @@ func journal_entry(array_of_entry []Account_value_quantity_barcode, auto_complet
 	description string, name string, employee_name string, array_day_start_end []day_start_end) ([]journal_tag, []invoice_tag, time.Time, int) {
 
 	if entry_expair.IsZero() == is_in(adjusting_method, adjusting_methods[:]) {
-		log.Fatal("check entry_expair => ", entry_expair, " and adjusting_method => ", adjusting_method, " should be in ", adjusting_methods)
+		log.Panic("check entry_expair => ", entry_expair, " and adjusting_method => ", adjusting_method, " should be in ", adjusting_methods)
 	}
 
 	if !entry_expair.IsZero() {
@@ -246,18 +248,18 @@ func journal_entry(array_of_entry []Account_value_quantity_barcode, auto_complet
 
 	for index, entry := range array_of_entry {
 		if entry.Account == "" && entry.barcode == "" {
-			log.Fatal("can't find the account name if the barcode is empty in ", entry)
+			log.Panic("can't find the account name if the barcode is empty in ", entry)
 		}
 		var tag string
 		if entry.Account == "" {
 			err = db.QueryRow("select account from journal where barcode=? limit 1", entry.barcode).Scan(&tag)
 			if err != nil {
-				log.Fatal("the barcode is wrong for ", entry)
+				log.Panic("the barcode is wrong for ", entry)
 			}
 			array_of_entry[index].Account = tag
 		}
 		if is_in(entry.Account, inventory) && !is_in(adjusting_method, []string{"expire", ""}) {
-			log.Fatal(entry.Account + " is in inventory you just can use expire or make it empty")
+			log.Panic(entry.Account + " is in inventory you just can use expire or make it empty")
 		}
 	}
 
@@ -289,7 +291,7 @@ func journal_entry(array_of_entry []Account_value_quantity_barcode, auto_complet
 			array_of_entry_to_reverse = append(array_of_entry_to_reverse, tag)
 		}
 		if len(array_of_entry_to_reverse) == 0 {
-			log.Fatal("you can't reverse entry number ", entry_to_correct)
+			log.Panic("you can't reverse entry number ", entry_to_correct)
 		}
 		reverse_entry_number := entry_number()
 		for index, entry := range array_of_entry_to_reverse {
@@ -370,23 +372,23 @@ func journal_entry(array_of_entry []Account_value_quantity_barcode, auto_complet
 			var account_balance float64
 			db.QueryRow("select sum(value) from journal where account=? and date<?", entry.Account, Now.String()).Scan(&account_balance)
 			if account_balance+entry.value < 0 {
-				log.Fatal("you cant enter ", entry, " because you have ", account_balance, " and that will make the balance of ", entry.Account, " negative ", account_balance+entry.value, " and that you just can do it in equity_normal accounts not other accounts")
+				log.Panic("you cant enter ", entry, " because you have ", account_balance, " and that will make the balance of ", entry.Account, " negative ", account_balance+entry.value, " and that you just can do it in equity_normal accounts not other accounts")
 			}
 		}
 		price_slice = append(price_slice, entry.value/entry.quantity)
 		if price_slice[index] < 0 {
-			log.Fatal("the ", entry.value, " and ", entry.quantity, " for ", entry, " should be positive both or negative both")
+			log.Panic("the ", entry.value, " and ", entry.quantity, " for ", entry, " should be positive both or negative both")
 		}
 		if is_in(entry.Account, debit_accounts) {
 			zero += entry.value
 		} else if is_in(entry.Account, credit_accounts) {
 			zero -= entry.value
 		} else {
-			log.Fatal(entry.Account, " is not on parameters accounts lists")
+			log.Panic(entry.Account, " is not on parameters accounts lists")
 		}
 	}
 	if zero != 0 {
-		log.Fatal(zero, " not equal 0 if the number>0 it means debit overstated else credit overstated debit-credit should equal zero")
+		log.Panic(zero, " not equal 0 if the number>0 it means debit overstated else credit overstated debit-credit should equal zero")
 	}
 
 	entry_number := entry_number()
@@ -460,23 +462,23 @@ func journal_entry(array_of_entry []Account_value_quantity_barcode, auto_complet
 			array_day_start_end[index].day = strings.Title(element.day)
 			switch {
 			case !is_in(array_day_start_end[index].day, standard_days[:]):
-				log.Fatal("error ", element.day, " for ", element, " is not in ", standard_days)
+				log.Panic("error ", element.day, " for ", element, " is not in ", standard_days)
 			case element.start_hour < 0:
-				log.Fatal("error ", element.start_hour, " for ", element, " is < 0")
+				log.Panic("error ", element.start_hour, " for ", element, " is < 0")
 			case element.start_hour > 23:
-				log.Fatal("error ", element.start_hour, " for ", element, " is > 23")
+				log.Panic("error ", element.start_hour, " for ", element, " is > 23")
 			case element.start_minute < 0:
-				log.Fatal("error ", element.start_minute, " for ", element, " is < 0")
+				log.Panic("error ", element.start_minute, " for ", element, " is < 0")
 			case element.start_minute > 59:
-				log.Fatal("error ", element.start_minute, " for ", element, " is > 59")
+				log.Panic("error ", element.start_minute, " for ", element, " is > 59")
 			case element.end_hour < 0:
-				log.Fatal("error ", element.end_hour, " for ", element, " is < 0")
+				log.Panic("error ", element.end_hour, " for ", element, " is < 0")
 			case element.end_hour > 23:
-				log.Fatal("error ", element.end_hour, " for ", element, " is > 23")
+				log.Panic("error ", element.end_hour, " for ", element, " is > 23")
 			case element.end_minute < 0:
-				log.Fatal("error ", element.end_minute, " for ", element, " is < 0")
+				log.Panic("error ", element.end_minute, " for ", element, " is < 0")
 			case element.end_minute > 59:
-				log.Fatal("error ", element.end_minute, " for ", element, " is > 59")
+				log.Panic("error ", element.end_minute, " for ", element, " is > 59")
 			}
 		}
 
@@ -491,10 +493,10 @@ func journal_entry(array_of_entry []Account_value_quantity_barcode, auto_complet
 					previous_end_date = end
 					end = time.Date(year, month_sting, day+day_counter, element.end_hour, element.end_minute, 0, 0, time.Local)
 					if start.After(end) {
-						log.Fatal("the start_hour and start_minute should be smaller than end_hour and end_minute for ", element)
+						log.Panic("the start_hour and start_minute should be smaller than end_hour and end_minute for ", element)
 					}
 					if previous_end_date.After(start) {
-						log.Fatal("the end_hour and end_minute for ", element.day, " should be smaller than start_hour and start_minute for the second ", element)
+						log.Panic("the end_hour and end_minute for ", element.day, " should be smaller than start_hour and start_minute for the second ", element)
 					}
 					minutes := end.Sub(start).Minutes()
 					total_minutes += minutes
@@ -564,7 +566,7 @@ func journal_entry(array_of_entry []Account_value_quantity_barcode, auto_complet
 	return array_to_insert, invoice, Now, entry_number
 }
 
-func (s Financial_accounting) financial_statements(start_base_date, end_base_date, start_date, end_date time.Time, remove_empties bool) ([]statement, []statement) {
+func (s Financial_accounting) financial_statements(start_base_date, end_base_date, start_date, end_date time.Time, remove_empties bool) ([]statement, []statement, []statement) {
 	check_dates(start_date, end_date)
 	check_dates(end_base_date, start_date)
 	check_dates(start_base_date, end_base_date)
@@ -580,8 +582,9 @@ func (s Financial_accounting) financial_statements(start_base_date, end_base_dat
 	var cash, cash_base []journal_tag
 	var number int
 	var ok, ok_base bool
-	var assets, assets_base, cash_increase, cash_increase_base float64
+	var assets, assets_base, net_sales, net_sales_base, cash_increase, cash_increase_base float64
 	journal_map := map[string]*statement{}
+	income_map := map[string]*statement{}
 	cash_map := map[string]*statement{}
 	for _, entry := range journal {
 		key_journal := entry.account
@@ -589,6 +592,12 @@ func (s Financial_accounting) financial_statements(start_base_date, end_base_dat
 		if sum_journal == nil {
 			sum_journal = &statement{}
 			journal_map[key_journal] = sum_journal
+		}
+		key_income := entry.account
+		sum_income := income_map[key_income]
+		if sum_income == nil {
+			sum_income = &statement{}
+			income_map[key_income] = sum_income
 		}
 		if number != entry.entry_number {
 			if ok_base {
@@ -639,26 +648,32 @@ func (s Financial_accounting) financial_statements(start_base_date, end_base_dat
 		in_base_period := date.After(start_base_date) && date.Before(end_base_date)
 		before_period := date.Before(start_date)
 		in_period := date.After(start_date) && date.Before(end_date)
+		is_revenues := is_in(entry.account, revenues)
+		is_temporary_debit_accounts := is_in(entry.account, temporary_debit_accounts)
+		is_cash_and_cash_equivalent := is_in(entry.account, cash_and_cash_equivalent)
+		is_expenses := is_in(entry.account, expenses)
+		is_sales := is_in(entry.account, sales)
+		is_sales_returns_and_allowances := is_in(entry.account, sales_returns_and_allowances)
+
 		number = entry.entry_number
 
-		if before_base_period || in_base_period {
-			if is_in(entry.account, assets_normal) {
-				assets_base += entry.value
-			} else if is_in(entry.account, assets_contra) {
-				assets_base -= entry.value
-			}
-		}
 		if is_in(entry.account, assets_normal) {
 			assets += entry.value
+			if before_base_period || in_base_period {
+				assets_base += entry.value
+			}
 		} else if is_in(entry.account, assets_contra) {
 			assets -= entry.value
+			if before_base_period || in_base_period {
+				assets_base -= entry.value
+			}
 		}
 
 		if before_base_period {
 			switch {
-			case is_in(entry.account, revenues):
+			case is_revenues:
 				retained_earnings.base_value += entry.value
-			case is_in(entry.account, temporary_debit_accounts):
+			case is_temporary_debit_accounts:
 				retained_earnings.base_value -= entry.value
 			default:
 				sum_journal.base_value += entry.value
@@ -668,17 +683,29 @@ func (s Financial_accounting) financial_statements(start_base_date, end_base_dat
 		if in_base_period {
 			sum_journal.base_value += entry.value
 			sum_journal.base_quantity += entry.quantity
-			if is_in(entry.account, cash_and_cash_equivalent) {
+			if is_cash_and_cash_equivalent {
 				ok_base = true
 			} else {
 				cash_base = append(cash_base, entry)
 			}
+			if is_revenues {
+				sum_income.base_value += entry.value
+				sum_income.base_quantity += entry.value
+			} else if is_expenses {
+				sum_income.base_value += entry.value
+				sum_income.base_quantity += entry.value
+			}
+			if is_sales {
+				net_sales_base += entry.value
+			} else if is_sales_returns_and_allowances {
+				net_sales_base -= entry.value
+			}
 		}
 		if before_period {
 			switch {
-			case is_in(entry.account, revenues):
+			case is_revenues:
 				retained_earnings.value += entry.value
-			case is_in(entry.account, temporary_debit_accounts):
+			case is_temporary_debit_accounts:
 				retained_earnings.value -= entry.value
 			default:
 				sum_journal.value += entry.value
@@ -688,17 +715,29 @@ func (s Financial_accounting) financial_statements(start_base_date, end_base_dat
 		if in_period {
 			sum_journal.value += entry.value
 			sum_journal.quantity += entry.quantity
-			if is_in(entry.account, cash_and_cash_equivalent) {
+			if is_cash_and_cash_equivalent {
 				ok = true
 			} else {
 				cash = append(cash, entry)
 			}
+			if is_revenues {
+				sum_income.value += entry.value
+				sum_income.quantity += entry.value
+			} else if is_expenses {
+				sum_income.value += entry.value
+				sum_income.quantity += entry.value
+			}
+			if is_sales {
+				net_sales += entry.value
+			} else if is_sales_returns_and_allowances {
+				net_sales -= entry.value
+			}
 		}
 	}
 	balance_sheet := append(prepare_statement(journal_map, assets, assets_base), retained_earnings)
+	income_statements := prepare_statement(income_map, net_sales, net_sales_base)
 	cash_flow := prepare_statement(cash_map, cash_increase, cash_increase_base)
-
-	return balance_sheet, cash_flow
+	return balance_sheet, income_statements, cash_flow
 }
 
 func insert_to_database(array_to_insert []journal_tag, insert_into_journal, insert_into_inventory, inventory_flow bool) {
@@ -760,7 +799,7 @@ func cost_flow(account string, quantity float64, barcode string, order_by_date_a
 		}
 	}
 	if quantity_count != 0 {
-		log.Fatal("you order ", quantity, " but you have ", quantity-quantity_count, " ", account, " with barcode ", barcode)
+		log.Panic("you order ", quantity, " but you have ", quantity-quantity_count, " ", account, " with barcode ", barcode)
 	}
 	return costs
 }
@@ -850,7 +889,7 @@ func error_fatal(err error) {
 
 func check_dates(start_date, end_date time.Time) {
 	if start_date.After(end_date) {
-		log.Fatal("please enter the start_date<=end_date")
+		log.Panic("please enter the start_date<=end_date")
 	}
 }
 
@@ -866,7 +905,7 @@ func check_if_duplicates(slice_of_elements []string) {
 		set_of_elems = append(set_of_elems, element)
 	}
 	if len(duplicated_element) != 0 {
-		log.Fatal(duplicated_element, " is duplicated values in the fields of Financial_accounting and that make error. you should remove the duplicate")
+		log.Panic(duplicated_element, " is duplicated values in the fields of Financial_accounting and that make error. you should remove the duplicate")
 	}
 }
 
@@ -882,7 +921,7 @@ func check_if_duplicates_directory(slice_of_elements [][]uint) {
 		set_of_elems = append(set_of_elems, element)
 	}
 	if len(duplicated_element) != 0 {
-		log.Fatal(duplicated_element, " is duplicated values in the fields of Financial_accounting and that make error. you should remove the duplicate")
+		log.Panic(duplicated_element, " is duplicated values in the fields of Financial_accounting and that make error. you should remove the duplicate")
 	}
 }
 
@@ -964,31 +1003,33 @@ func transpose(slice [][]journal_tag) [][]journal_tag {
 
 func main() {
 	v := Financial_accounting{
-		DriverName:                 "mysql",
-		DataSourceName:             "hashem:hashem@tcp(localhost)/",
-		Company_name:               "hashem2",
-		Discount:                   0,
-		Invoice_discounts_tax_list: [][3]float64{{5, -10, 0}, {50, -5, -5}},
-		Fifo:                       []directory_account_price_discount_tax{{[]uint{1, 3, 1}, "book1", 15, 0, 0}},
-		Lifo:                       []directory_account_price_discount_tax{{[]uint{1, 3, 2}, "book2", 15, 0, 0}},
-		Wma:                        []directory_account_price_discount_tax{{[]uint{1, 3, 3}, "book", 10, -1, -1}},
-		Service:                    []directory_account_price_discount_tax{{[]uint{4, 3, 4}, "service revenue", 2, -1, -1}},
-		retained_earnings:          [1]directory_account{{[]uint{4, 4}, "retained_earnings"}},
-		Assets_normal:              []directory_account{{[]uint{1, 1}, "office equipment"}, {[]uint{1}, "Assets_normal"}, {[]uint{1, 3}, "inventory"}},
-		Cash_and_cash_equivalent:   []directory_account{{[]uint{1, 8}, "cash"}},
-		Assets_contra:              []directory_account{},
-		Liabilities_normal:         []directory_account{{[]uint{2, 1}, "tax"}, {[]uint{2}, "Liabilities"}},
-		Liabilities_contra:         []directory_account{},
-		Equity_normal:              []directory_account{},
-		Equity_contra:              []directory_account{},
-		Withdrawals:                []directory_account{},
-		Revenues:                   []directory_account{{[]uint{4, 1}, "revenue of service revenue"}, {[]uint{4, 2}, "revenue of book"}, {[]uint{4, 3}, "service"}, {[]uint{4}, "revenue"}},
-		Discounts:                  []directory_account{{[]uint{3, 1}, "discount of service revenue"}, {[]uint{3, 6}, "discount of book"}, {[]uint{3, 7}, "invoice discount"}},
-		Expenses:                   []directory_account{{[]uint{3, 4}, "tax of service revenue"}, {[]uint{3, 2}, "expair_expenses"}, {[]uint{3, 3}, "cost of book"}, {[]uint{3, 5}, "tax of book"}, {[]uint{3, 8}, "invoice tax"}, {[]uint{3}, "expenses"}},
+		DriverName:                   "mysql",
+		DataSourceName:               "hashem:hashem@tcp(localhost)/",
+		Company_name:                 "hashem2",
+		Discount:                     0,
+		Invoice_discounts_tax_list:   [][3]float64{{5, -10, 0}, {50, -5, -5}},
+		Fifo:                         []directory_account_price_discount_tax{{[]uint{1, 3, 1}, "book1", 15, 0, 0}},
+		Lifo:                         []directory_account_price_discount_tax{{[]uint{1, 3, 2}, "book2", 15, 0, 0}},
+		Wma:                          []directory_account_price_discount_tax{{[]uint{1, 3, 3}, "book", 10, -1, -1}},
+		Service:                      []directory_account_price_discount_tax{{[]uint{4, 3, 4}, "service revenue", 2, -1, -1}},
+		retained_earnings:            [1]directory_account{{[]uint{4, 4}, "retained_earnings"}},
+		Assets_normal:                []directory_account{{[]uint{1, 1}, "office equipment"}, {[]uint{1}, "Assets_normal"}, {[]uint{1, 3}, "inventory"}},
+		Cash_and_cash_equivalent:     []directory_account{{[]uint{1, 8}, "cash"}},
+		Assets_contra:                []directory_account{},
+		Liabilities_normal:           []directory_account{{[]uint{2, 1}, "tax"}, {[]uint{2}, "Liabilities"}},
+		Liabilities_contra:           []directory_account{},
+		Equity_normal:                []directory_account{},
+		Equity_contra:                []directory_account{},
+		Withdrawals:                  []directory_account{},
+		Sales:                        []directory_account{{[]uint{4, 1}, "revenue of service revenue"}, {[]uint{4, 2}, "revenue of book"}},
+		Revenues:                     []directory_account{{[]uint{4, 3}, "service"}, {[]uint{4}, "revenue"}},
+		Discounts:                    []directory_account{{[]uint{3, 1}, "discount of service revenue"}, {[]uint{3, 6}, "discount of book"}, {[]uint{3, 7}, "invoice discount"}},
+		Sales_returns_and_allowances: []directory_account{},
+		Expenses:                     []directory_account{{[]uint{3, 4}, "tax of service revenue"}, {[]uint{3, 2}, "expair_expenses"}, {[]uint{3, 3}, "cost of book"}, {[]uint{3, 5}, "tax of book"}, {[]uint{3, 8}, "invoice tax"}, {[]uint{3}, "expenses"}},
 	}
 	v.initialize()
 	// entry, invoice, t, entry_number := journal_entry([]Account_value_quantity_barcode{{"cash", 9995, 9995, ""}, {"service revenue", 10, -10000, ""}}, true, 0 /*uint(entry_number())-1*/, Now,
-	// 	time.Time{}, "", "", "yasa", "hashem", []day_start_end{})
+	// 	time.Date(2021, time.December, 31, 0, 0, 0, 0, time.Local), "linear", "", "yasa", "hashem", []day_start_end{})
 
 	// fmt.Println(invoice, t, entry_number)
 	// r := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
@@ -997,18 +1038,23 @@ func main() {
 	// }
 	// r.Flush()
 
-	balance_sheet, cash_flow := v.financial_statements(
-		time.Date(2020, time.May, 20, 13, 00, 00, 00, time.Local),
-		time.Date(2020, time.May, 20, 13, 00, 00, 00, time.Local),
+	balance_sheet, income_statements, cash_flow := v.financial_statements(
 		time.Date(2020, time.May, 20, 13, 00, 00, 00, time.Local),
 		time.Date(2022, time.May, 20, 13, 00, 00, 00, time.Local),
+		time.Date(2022, time.May, 20, 13, 00, 00, 00, time.Local),
+		time.Date(2023, time.May, 20, 13, 00, 00, 00, time.Local),
 		true)
 
 	w := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
+	fmt.Fprintln(w, "####################################################################### balance_sheet #######################################################################")
 	for _, i := range balance_sheet {
 		fmt.Fprintln(w, i.directory_no, "\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.percent, "\t", i.base_value, "\t", i.base_price, "\t", i.base_quantity, "\t", i.base_percent, "\t", i.changes_since_base_period, "\t", i.current_period_in_relation_to_base_period, "\t")
 	}
-	fmt.Fprintln(w, "##################################################################### cash_flow #####################################################################")
+	fmt.Fprintln(w, "##################################################################### income_statements #####################################################################")
+	for _, i := range income_statements {
+		fmt.Fprintln(w, i.directory_no, "\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.percent, "\t", i.base_value, "\t", i.base_price, "\t", i.base_quantity, "\t", i.base_percent, "\t", i.changes_since_base_period, "\t", i.current_period_in_relation_to_base_period, "\t")
+	}
+	fmt.Fprintln(w, "######################################################################### cash_flow #########################################################################")
 	for _, i := range cash_flow {
 		fmt.Fprintln(w, i.directory_no, "\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.percent, "\t", i.base_value, "\t", i.base_price, "\t", i.base_quantity, "\t", i.base_percent, "\t", i.changes_since_base_period, "\t", i.current_period_in_relation_to_base_period, "\t")
 	}
