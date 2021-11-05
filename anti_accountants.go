@@ -49,10 +49,11 @@ type directory_account struct {
 }
 
 type Financial_accounting struct {
-	DriverName, DataSourceName, Company_name string
-	Discount                                 float64
-	Invoice_discounts_tax_list               [][3]float64
-	Fifo, Lifo, Wma, Service                 []directory_account_price_discount_tax
+	DriverName, DataSourceName, Company_name               string
+	Discount                                               float64
+	Invoice_discounts_tax_list                             [][3]float64
+	Assets_normal_directory_no, Assets_contra_directory_no []uint
+	Fifo, Lifo, Wma, Service                               []directory_account_price_discount_tax
 	Assets_normal, Cash_and_cash_equivalent, Assets_contra, Liabilities_normal, Liabilities_contra,
 	Equity_normal, Equity_contra, Withdrawals, Revenues, Discounts, Expenses []directory_account
 }
@@ -98,12 +99,13 @@ var (
 	db                         *sql.DB
 	err                        error
 	price_discount_tax         []directory_account_price_discount_tax
+	all_directory_account      []directory_account
 	standard_days              = [7]string{"Saturday", "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday"}
 	adjusting_methods          = [4]string{"linear", "exponential", "logarithmic", "expire"}
 	depreciation_methods       = [3]string{"linear", "exponential", "logarithmic"}
 	start_date, end_date       time.Time
-	now                        = time.Now()
-	date                       = now
+	Now                        = time.Now()
+	date                       = Now
 )
 
 func (s Financial_accounting) initialize() {
@@ -152,9 +154,9 @@ func (s Financial_accounting) initialize() {
 
 	entry_number := entry_number()
 	var array_to_insert []journal_tag
-	expair_expenses := journal_tag{now.String(), entry_number, "expair_expenses", 0, 0, 0, "", time.Time{}.String(),
-		"to record the expiry of the goods automatically", "", "", now.String(), false}
-	expair_goods, _ := db.Query("select account,price*quantity*-1,price,quantity*-1,barcode from inventory where entry_expair<? and entry_expair!='0001-01-01 00:00:00 +0000 UTC'", now.String())
+	expair_expenses := journal_tag{Now.String(), entry_number, "expair_expenses", 0, 0, 0, "", time.Time{}.String(),
+		"to record the expiry of the goods automatically", "", "", Now.String(), false}
+	expair_goods, _ := db.Query("select account,price*quantity*-1,price,quantity*-1,barcode from inventory where entry_expair<? and entry_expair!='0001-01-01 00:00:00 +0000 UTC'", Now.String())
 	for expair_goods.Next() {
 		tag := expair_expenses
 		expair_goods.Scan(&tag.account, &tag.value, &tag.price, &tag.quantity, &tag.barcode)
@@ -165,7 +167,7 @@ func (s Financial_accounting) initialize() {
 	expair_expenses.price = expair_expenses.value / expair_expenses.quantity
 	array_to_insert = append(array_to_insert, expair_expenses)
 	insert_to_database(array_to_insert, true, false, false)
-	db.Exec("delete from inventory where entry_expair<? and entry_expair!='0001-01-01 00:00:00 +0000 UTC'", now.String())
+	db.Exec("delete from inventory where entry_expair<? and entry_expair!='0001-01-01 00:00:00 +0000 UTC'", Now.String())
 	db.Exec("delete from inventory where quantity=0")
 
 	accounts := column_values("account")
@@ -194,6 +196,39 @@ func (s Financial_accounting) initialize() {
 
 	check_if_duplicates_directory(all_directorys)
 	check_if_duplicates(all_accounts)
+
+	all_directory_account = concat(
+		directory_account_slice(s.Fifo),
+		directory_account_slice(s.Lifo),
+		directory_account_slice(s.Wma),
+		directory_account_slice(s.Service),
+		s.Assets_normal,
+		s.Cash_and_cash_equivalent,
+		s.Assets_contra,
+		s.Liabilities_normal,
+		s.Liabilities_contra,
+		s.Equity_normal,
+		s.Equity_contra,
+		s.Withdrawals,
+		s.Revenues,
+		s.Discounts,
+		s.Expenses).([]directory_account)
+
+	for _, directory := range all_directorys {
+		l := len(directory)
+		if l != 1 {
+			ok := false
+			for _, d := range all_directorys {
+				if reflect.DeepEqual(d, directory[:l-1]) {
+					ok = true
+					break
+				}
+			}
+			if !ok {
+				log.Fatal("this directory ", directory, " don't have parent directory like this ", directory[:l-1])
+			}
+		}
+	}
 }
 
 func journal_entry(array_of_entry []Account_value_quantity_barcode, auto_completion bool, entry_to_correct uint, date time.Time, entry_expair time.Time, adjusting_method string,
@@ -204,9 +239,7 @@ func journal_entry(array_of_entry []Account_value_quantity_barcode, auto_complet
 	}
 
 	if !entry_expair.IsZero() {
-		date, entry_expair = check_dates(dates(date), dates(entry_expair))
-	} else {
-		date = dates(date)
+		check_dates(date, entry_expair)
 	}
 
 	for index, entry := range array_of_entry {
@@ -247,7 +280,7 @@ func journal_entry(array_of_entry []Account_value_quantity_barcode, auto_complet
 
 	var array_of_entry_to_reverse []journal_tag
 	if entry_to_correct != 0 {
-		rows, _ := db.Query("select * from journal where entry_number=? and date<? and reverse=false", entry_to_correct, now.String())
+		rows, _ := db.Query("select * from journal where entry_number=? and date<? and reverse=false", entry_to_correct, Now.String())
 		for rows.Next() {
 			var tag journal_tag
 			rows.Scan(&tag.date, &tag.entry_number, &tag.account, &tag.value, &tag.price, &tag.quantity, &tag.barcode, &tag.entry_expair, &tag.description, &tag.name, &tag.employee_name, &tag.entry_date, &tag.reverse)
@@ -258,20 +291,20 @@ func journal_entry(array_of_entry []Account_value_quantity_barcode, auto_complet
 		}
 		reverse_entry_number := entry_number()
 		for index, entry := range array_of_entry_to_reverse {
-			array_of_entry_to_reverse[index].date = now.String()
+			array_of_entry_to_reverse[index].date = Now.String()
 			array_of_entry_to_reverse[index].entry_number = reverse_entry_number
 			array_of_entry_to_reverse[index].value *= -1
 			array_of_entry_to_reverse[index].quantity *= -1
 			array_of_entry_to_reverse[index].entry_expair = entry_expair.String()
 			array_of_entry_to_reverse[index].description = "(reverse entry for entry number " + strconv.Itoa(entry.entry_number) + " entered by " + entry.employee_name + " and revised by " + employee_name + ")"
 			array_of_entry_to_reverse[index].employee_name = employee_name
-			array_of_entry_to_reverse[index].entry_date = now.String()
+			array_of_entry_to_reverse[index].entry_date = Now.String()
 			if is_in(entry.account, inventory) {
 				weighted_average([]string{entry.account})
 			}
 		}
 		db.Exec("update journal set reverse=True where entry_number=?", entry_to_correct)
-		db.Exec("delete from journal where reverse=True and date>?", now.String())
+		db.Exec("delete from journal where reverse=True and date>?", Now.String())
 	}
 
 	var total_invoice_before_invoice_discount float64
@@ -333,7 +366,7 @@ func journal_entry(array_of_entry []Account_value_quantity_barcode, auto_complet
 	for index, entry := range array_of_entry {
 		if !is_in(entry.Account, equity_normal) {
 			var account_balance float64
-			db.QueryRow("select sum(value) from journal where account=? and date<?", entry.Account, now.String()).Scan(&account_balance)
+			db.QueryRow("select sum(value) from journal where account=? and date<?", entry.Account, Now.String()).Scan(&account_balance)
 			if account_balance+entry.value < 0 {
 				log.Fatal("you cant enter ", entry, " because you have ", account_balance, " and that will make the balance of ", entry.Account, " negative ", account_balance+entry.value, " and that you just can do it in equity_normal accounts not other accounts")
 			}
@@ -369,7 +402,7 @@ func journal_entry(array_of_entry []Account_value_quantity_barcode, auto_complet
 			description:   description,
 			name:          name,
 			employee_name: employee_name,
-			entry_date:    now.String(),
+			entry_date:    Now.String(),
 			reverse:       false,
 		})
 	}
@@ -511,7 +544,7 @@ func journal_entry(array_of_entry []Account_value_quantity_barcode, auto_complet
 					description:   description,
 					name:          name,
 					employee_name: employee_name,
-					entry_date:    now.String(),
+					entry_date:    Now.String(),
 					reverse:       false,
 				})
 			}
@@ -526,13 +559,13 @@ func journal_entry(array_of_entry []Account_value_quantity_barcode, auto_complet
 
 	array_to_insert = append(array_of_entry_to_reverse, array_to_insert...)
 	insert_to_database(array_to_insert, true, true, true)
-	return array_to_insert, invoice, now, entry_number
+	return array_to_insert, invoice, Now, entry_number
 }
 
 func financial_statements(start_base_date, end_base_date, start_date, end_date time.Time, remove_empties bool) ([]statement, []statement) {
-	start_date, end_date = check_dates(dates(start_date), dates(end_date))
-	check_dates(dates(end_base_date), dates(start_date))
-	start_base_date, end_base_date = check_dates(dates(start_base_date), dates(end_base_date))
+	check_dates(start_date, end_date)
+	check_dates(end_base_date, start_date)
+	check_dates(start_base_date, end_base_date)
 	rows, _ := db.Query("select date,entry_number,account,value,quantity from journal")
 	var journal []journal_tag
 	for rows.Next() {
@@ -646,7 +679,7 @@ func financial_statements(start_base_date, end_base_date, start_date, end_date t
 	balance_sheet := []statement{}
 	for key, v := range journal_map {
 		balance_sheet = append(balance_sheet, statement{
-			directory_no:       []uint{},
+			directory_no:       directory(key),
 			account:            key,
 			value:              v.value,
 			price:              v.value / v.quantity,
@@ -665,7 +698,7 @@ func financial_statements(start_base_date, end_base_date, start_date, end_date t
 	cash_flow := []statement{}
 	for key, v := range cash_map {
 		cash_flow = append(cash_flow, statement{
-			directory_no:       []uint{},
+			directory_no:       directory(key),
 			account:            key,
 			value:              v.value,
 			price:              v.value / v.quantity,
@@ -775,6 +808,15 @@ func entry_number() int {
 	return tag + 1
 }
 
+func directory(account string) []uint {
+	for _, i := range all_directory_account {
+		if account == i.account_name {
+			return i.directory_no
+		}
+	}
+	return []uint{}
+}
+
 func is_in(element string, elements []string) bool {
 	for _, a := range elements {
 		if a == element {
@@ -802,18 +844,10 @@ func error_fatal(err error) {
 	}
 }
 
-func dates(date time.Time) time.Time {
-	if date.IsZero() {
-		return now
-	}
-	return date
-}
-
-func check_dates(start_date, end_date time.Time) (time.Time, time.Time) {
+func check_dates(start_date, end_date time.Time) {
 	if start_date.After(end_date) {
 		log.Fatal("please enter the start_date<=end_date")
 	}
-	return start_date, end_date
 }
 
 func check_if_duplicates(slice_of_elements []string) {
@@ -877,6 +911,14 @@ func accounts_slice(args []directory_account_price_discount_tax) []string {
 	return accounts_slice
 }
 
+func directory_account_slice(args []directory_account_price_discount_tax) []directory_account {
+	accounts_slice := []directory_account{}
+	for _, i := range args {
+		accounts_slice = append(accounts_slice, directory_account{i.directory_no, i.Account})
+	}
+	return accounts_slice
+}
+
 func accounts_name(args []directory_account) []string {
 	accounts_slice := []string{}
 	for _, i := range args {
@@ -927,43 +969,43 @@ func main() {
 		Lifo:                       []directory_account_price_discount_tax{{[]uint{1, 3, 2}, "book2", 15, 0, 0}},
 		Wma:                        []directory_account_price_discount_tax{{[]uint{1, 3, 3}, "book", 10, -1, -1}},
 		Service:                    []directory_account_price_discount_tax{{[]uint{4, 3, 4}, "service revenue", 2, -1, -1}},
-		Assets_normal:              []directory_account{{[]uint{1, 1}, "office equipment"}},
+		Assets_normal:              []directory_account{{[]uint{1, 1}, "office equipment"}, {[]uint{1}, "Assets_normal"}, {[]uint{1, 3}, "inventory"}},
 		Cash_and_cash_equivalent:   []directory_account{{[]uint{1, 8}, "cash"}},
 		Assets_contra:              []directory_account{},
-		Liabilities_normal:         []directory_account{{[]uint{2, 1}, "tax"}},
+		Liabilities_normal:         []directory_account{{[]uint{2, 1}, "tax"}, {[]uint{2}, "Liabilities"}},
 		Liabilities_contra:         []directory_account{},
 		Equity_normal:              []directory_account{},
 		Equity_contra:              []directory_account{},
 		Withdrawals:                []directory_account{},
-		Revenues:                   []directory_account{{[]uint{4, 1}, "revenue of service revenue"}, {[]uint{4, 2}, "revenue of book"}},
+		Revenues:                   []directory_account{{[]uint{4, 1}, "revenue of service revenue"}, {[]uint{4, 2}, "revenue of book"}, {[]uint{4, 3}, "service"}, {[]uint{4}, "revenue"}},
 		Discounts:                  []directory_account{{[]uint{3, 1}, "discount of service revenue"}, {[]uint{3, 6}, "discount of book"}, {[]uint{3, 7}, "invoice discount"}},
-		Expenses:                   []directory_account{{[]uint{3, 4}, "tax of service revenue"}, {[]uint{3, 2}, "expair_expenses"}, {[]uint{3, 3}, "cost of book"}, {[]uint{3, 5}, "tax of book"}, {[]uint{3, 8}, "invoice tax"}},
+		Expenses:                   []directory_account{{[]uint{3, 4}, "tax of service revenue"}, {[]uint{3, 2}, "expair_expenses"}, {[]uint{3, 3}, "cost of book"}, {[]uint{3, 5}, "tax of book"}, {[]uint{3, 8}, "invoice tax"}, {[]uint{3}, "expenses"}},
 	}
 	v.initialize()
-	entry, invoice, t, entry_number := journal_entry([]Account_value_quantity_barcode{{"cash", 9995, 9995, ""}, {"service revenue", 10, -10000, ""}}, true, 0 /*uint(entry_number())-1*/, time.Date(2020, time.May, 20, 13, 00, 00, 00, time.Local),
-		time.Date(2020, time.May, 20, 13, 00, 00, 00, time.Local), "linear", "", "yasa", "hashem", []day_start_end{})
+	// entry, invoice, t, entry_number := journal_entry([]Account_value_quantity_barcode{{"cash", 9995, 9995, ""}, {"service revenue", 10, -10000, ""}}, true, 0 /*uint(entry_number())-1*/, Now,
+	// 	time.Time{}, "", "", "yasa", "hashem", []day_start_end{})
 
-	fmt.Println(invoice, t, entry_number)
-	r := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
-	for _, i := range entry {
-		fmt.Fprintln(r, "\t", i.date, "\t", i.entry_number, "\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.barcode, "\t", i.entry_expair, "\t", i.description, "\t", i.name, "\t", i.employee_name, "\t", i.entry_date, "\t", i.reverse)
+	// fmt.Println(invoice, t, entry_number)
+	// r := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
+	// for _, i := range entry {
+	// 	fmt.Fprintln(r, "\t", i.date, "\t", i.entry_number, "\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.barcode, "\t", i.entry_expair, "\t", i.description, "\t", i.name, "\t", i.employee_name, "\t", i.entry_date, "\t", i.reverse)
+	// }
+	// r.Flush()
+
+	balance_sheet, cash_flow := financial_statements(
+		time.Date(2020, time.May, 20, 13, 00, 00, 00, time.Local),
+		time.Date(2020, time.May, 20, 13, 00, 00, 00, time.Local),
+		time.Date(2020, time.May, 20, 13, 00, 00, 00, time.Local),
+		time.Date(2022, time.May, 20, 13, 00, 00, 00, time.Local),
+		true)
+
+	w := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
+	for _, i := range balance_sheet {
+		fmt.Fprintln(w, i.directory_no, "\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.percent, "\t", i.base_value, "\t", i.base_price, "\t", i.base_quantity, "\t", i.base_percent, "\t", i.difference, "\t", i.difference_percent, "\t")
 	}
-	r.Flush()
-
-	// balance_sheet, cash_flow := financial_statements(
-	// 	time.Date(2020, time.May, 20, 13, 00, 00, 00, time.Local),
-	// 	time.Date(2021, time.May, 20, 13, 00, 00, 00, time.Local),
-	// 	time.Date(2022, time.May, 20, 13, 00, 00, 00, time.Local),
-	// 	time.Date(2022, time.May, 20, 13, 00, 00, 00, time.Local),
-	// 	true)
-
-	// w := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
-	// for _, i := range balance_sheet {
-	// 	fmt.Fprintln(w, i.directory_no, "\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.percent, "\t", i.base_value, "\t", i.base_price, "\t", i.base_quantity, "\t", i.base_percent, "\t", i.difference, "\t", i.difference_percent, "\t")
-	// }
-	// fmt.Fprintln(w, "##################################################################### cash_flow #####################################################################")
-	// for _, i := range cash_flow {
-	// 	fmt.Fprintln(w, i.directory_no, "\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.percent, "\t", i.base_value, "\t", i.base_price, "\t", i.base_quantity, "\t", i.base_percent, "\t", i.difference, "\t", i.difference_percent, "\t")
-	// }
-	// w.Flush()
+	fmt.Fprintln(w, "##################################################################### cash_flow #####################################################################")
+	for _, i := range cash_flow {
+		fmt.Fprintln(w, i.directory_no, "\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.percent, "\t", i.base_value, "\t", i.base_price, "\t", i.base_quantity, "\t", i.base_percent, "\t", i.difference, "\t", i.difference_percent, "\t")
+	}
+	w.Flush()
 }
