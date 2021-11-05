@@ -694,10 +694,10 @@ func (s Financial_accounting) financial_statements(start_base_date, end_base_dat
 			}
 			if is_revenues {
 				sum_income.base_value += entry.value
-				sum_income.base_quantity += entry.value
+				sum_income.base_quantity += entry.quantity
 			} else if is_expenses {
 				sum_income.base_value += entry.value
-				sum_income.base_quantity += entry.value
+				sum_income.base_quantity += entry.quantity
 			}
 			if is_sales {
 				net_sales_base += entry.value
@@ -726,10 +726,10 @@ func (s Financial_accounting) financial_statements(start_base_date, end_base_dat
 			}
 			if is_revenues {
 				sum_income.value += entry.value
-				sum_income.quantity += entry.value
+				sum_income.quantity += entry.quantity
 			} else if is_expenses {
 				sum_income.value += entry.value
-				sum_income.quantity += entry.value
+				sum_income.quantity += entry.quantity
 			}
 			if is_sales {
 				net_sales += entry.value
@@ -1044,8 +1044,8 @@ func main() {
 
 	balance_sheet, income_statements, cash_flow := v.financial_statements(
 		time.Date(2020, time.May, 20, 13, 00, 00, 00, time.Local),
-		time.Date(2022, time.May, 20, 13, 00, 00, 00, time.Local),
-		time.Date(2022, time.May, 20, 13, 00, 00, 00, time.Local),
+		time.Date(2020, time.May, 20, 13, 00, 00, 00, time.Local),
+		time.Date(2020, time.May, 20, 13, 00, 00, 00, time.Local),
 		time.Date(2023, time.May, 20, 13, 00, 00, 00, time.Local),
 		true)
 
