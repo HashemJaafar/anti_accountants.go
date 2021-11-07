@@ -37,25 +37,23 @@ type Account_value_quantity_barcode struct {
 	barcode  string
 }
 
-type directory_account_price_discount_tax struct {
-	directory_no         []uint
-	Account              string
-	Price, Discount, Tax float64
-}
-
 type directory_account struct {
 	directory_no []uint
 	account_name string
 }
 
+type account_value_price_percent struct {
+	account               string
+	value, price, percent float64
+}
+
 type Financial_accounting struct {
-	DriverName, DataSourceName, Company_name string
-	Discount                                 float64
-	Invoice_discounts_tax_list               [][3]float64
-	Fifo, Lifo, Wma, Service                 []directory_account_price_discount_tax
-	retained_earnings                        [1]directory_account
-	Assets_normal, Cash_and_cash_equivalent, Assets_contra, Liabilities_normal, Liabilities_contra,
+	DriverName, DataSourceName, Database_name string
+	Invoice_discounts_tax_list                [][3]float64
+	retained_earnings                         [1]directory_account
+	Assets_normal, Cash_and_cash_equivalent, Fifo, Lifo, Wma, Assets_contra, Liabilities_normal, Liabilities_contra,
 	Equity_normal, Equity_contra, Withdrawals, Sales, Revenues, Discounts, Sales_returns_and_allowances, Expenses []directory_account
+	auto_complete_entries [][]account_value_price_percent
 }
 
 type journal_tag struct {
@@ -74,16 +72,6 @@ type journal_tag struct {
 	reverse       bool
 }
 
-type invoice_tag struct {
-	account              string
-	value_after_discount float64
-	value                float64
-	price                float64
-	total_discount       float64
-	discount             float64
-	quantity             float64
-}
-
 type statement struct {
 	directory_no []uint
 	account      string
@@ -97,42 +85,26 @@ var (
 	withdrawals, sales, revenues, sales_returns_and_allowances, expenses, discounts, temporary_debit_accounts, temporary_accounts, debit_accounts, credit_accounts []string
 	invoice_discounts_tax_list [][3]float64
 	db                         *sql.DB
-	err                        error
-	price_discount_tax         []directory_account_price_discount_tax
 	all_directory_account      []directory_account
 	standard_days              = [7]string{"Saturday", "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday"}
 	adjusting_methods          = [4]string{"linear", "exponential", "logarithmic", "expire"}
 	depreciation_methods       = [3]string{"linear", "exponential", "logarithmic"}
-	start_date, end_date       time.Time
 	Now                        = time.Now()
-	date                       = Now
 )
 
 func (s Financial_accounting) initialize() {
 	db, _ = sql.Open(s.DriverName, s.DataSourceName)
-	err = db.Ping()
+	err := db.Ping()
 	error_fatal(err)
-	db.Exec("create database if not exists " + s.Company_name)
-	_, err = db.Exec("USE " + s.Company_name)
+	db.Exec("create database if not exists " + s.Database_name)
+	_, err = db.Exec("USE " + s.Database_name)
 	error_fatal(err)
 	db.Exec("create table if not exists journal (date text,entry_number integer,account text,value real,price real,quantity real,barcode text,entry_expair text,description text,name text,employee_name text,entry_date text,reverse bool)")
 	db.Exec("create table if not exists inventory (date text,entry_number integer,account text,price real,quantity real,quantity_remaining real,adjusted_cost real,barcode text,entry_expair text,name text,employee_name text,entry_date text)")
 
-	price_discount_tax = concat(s.Fifo, s.Lifo, s.Wma, s.Service).([]directory_account_price_discount_tax)
-	for index, i := range price_discount_tax {
-		price_discount_tax[index].Discount = discount_tax_calculator(i.Price, i.Discount)
-		price_discount_tax[index].Tax = discount_tax_calculator(i.Price, i.Tax)
-	}
-	if s.Discount != 0 {
-		for index, i := range price_discount_tax {
-			price_discount_tax[index].Discount = discount_tax_calculator(i.Price, s.Discount)
-		}
-	}
-
-	fifo = accounts_slice(s.Fifo)
-	lifo = accounts_slice(s.Lifo)
-	wma = accounts_slice(s.Wma)
-	service = accounts_slice(s.Service)
+	fifo = accounts_name(s.Fifo)
+	lifo = accounts_name(s.Lifo)
+	wma = accounts_name(s.Wma)
 	inventory = concat(fifo, lifo, wma).([]string)
 	cash_and_cash_equivalent = accounts_name(s.Cash_and_cash_equivalent)
 	assets_normal = concat(accounts_name(s.Assets_normal), cash_and_cash_equivalent, inventory).([]string)
@@ -179,26 +151,9 @@ func (s Financial_accounting) initialize() {
 		}
 	}
 
-	all_directorys := concat(
-		accounts_directory(s.Fifo),
-		accounts_directory(s.Lifo),
-		accounts_directory(s.Wma),
-		accounts_directory(s.Service),
-		accounts_directory1(s.retained_earnings[:]),
-		accounts_directory1(s.Assets_normal),
-		accounts_directory1(s.Cash_and_cash_equivalent),
-		accounts_directory1(s.Assets_contra),
-		accounts_directory1(s.Liabilities_normal),
-		accounts_directory1(s.Liabilities_contra),
-		accounts_directory1(s.Equity_normal),
-		accounts_directory1(s.Equity_contra),
-		accounts_directory1(s.Withdrawals),
-		accounts_directory1(s.Sales),
-		accounts_directory1(s.Revenues),
-		accounts_directory1(s.Discounts),
-		accounts_directory1(s.Sales_returns_and_allowances),
-		accounts_directory1(s.Expenses)).([][]uint)
-
+	all_directory_account = concat(s.retained_earnings[:], s.Assets_normal, s.Cash_and_cash_equivalent, s.Fifo, s.Lifo, s.Wma, s.Assets_contra, s.Liabilities_normal, s.Liabilities_contra,
+		s.Equity_normal, s.Equity_contra, s.Withdrawals, s.Sales, s.Revenues, s.Discounts, s.Sales_returns_and_allowances, s.Expenses).([]directory_account)
+	all_directorys := concat(accounts_directory1(all_directory_account)).([][]uint)
 	check_if_duplicates_directory(all_directorys)
 	check_if_duplicates(all_accounts)
 
@@ -217,30 +172,10 @@ func (s Financial_accounting) initialize() {
 			}
 		}
 	}
-
-	all_directory_account = concat(
-		directory_account_slice(s.Fifo),
-		directory_account_slice(s.Lifo),
-		directory_account_slice(s.Wma),
-		directory_account_slice(s.Service),
-		s.retained_earnings[:],
-		s.Assets_normal,
-		s.Cash_and_cash_equivalent,
-		s.Assets_contra,
-		s.Liabilities_normal,
-		s.Liabilities_contra,
-		s.Equity_normal,
-		s.Equity_contra,
-		s.Withdrawals,
-		s.Sales,
-		s.Revenues,
-		s.Discounts,
-		s.Sales_returns_and_allowances,
-		s.Expenses).([]directory_account)
 }
 
-func journal_entry(array_of_entry []Account_value_quantity_barcode, auto_completion bool, entry_to_correct uint, date time.Time, entry_expair time.Time, adjusting_method string,
-	description string, name string, employee_name string, array_day_start_end []day_start_end) ([]journal_tag, []invoice_tag, time.Time, int) {
+func (s Financial_accounting) journal_entry(array_of_entry []Account_value_quantity_barcode, auto_completion bool, entry_to_correct uint, date time.Time, entry_expair time.Time, adjusting_method string,
+	description string, name string, employee_name string, array_day_start_end []day_start_end) ([]journal_tag, []account_value_price_percent, time.Time, int) {
 
 	if entry_expair.IsZero() == is_in(adjusting_method, adjusting_methods[:]) {
 		log.Panic("check entry_expair => ", entry_expair, " and adjusting_method => ", adjusting_method, " should be in ", adjusting_methods)
@@ -256,7 +191,7 @@ func journal_entry(array_of_entry []Account_value_quantity_barcode, auto_complet
 		}
 		var tag string
 		if entry.Account == "" {
-			err = db.QueryRow("select account from journal where barcode=? limit 1", entry.barcode).Scan(&tag)
+			err := db.QueryRow("select account from journal where barcode=? limit 1", entry.barcode).Scan(&tag)
 			if err != nil {
 				log.Panic("the barcode is wrong for ", entry)
 			}
@@ -317,31 +252,39 @@ func journal_entry(array_of_entry []Account_value_quantity_barcode, auto_complet
 
 	var total_invoice_before_invoice_discount float64
 	var costs float64
-	for index := 0; index < len(array_of_entry); index++ {
-		quantity := math.Abs(array_of_entry[index].quantity)
-		switch {
-		case is_in(array_of_entry[index].Account, inventory) && array_of_entry[index].quantity < 0:
-			switch {
-			case is_in(array_of_entry[index].Account, fifo) || is_in(array_of_entry[index].Account, wma):
-				costs = cost_flow(array_of_entry[index].Account, array_of_entry[index].quantity, array_of_entry[index].barcode, "asc", false)
-			case is_in(array_of_entry[index].Account, lifo):
-				costs = cost_flow(array_of_entry[index].Account, array_of_entry[index].quantity, array_of_entry[index].barcode, "desc", false)
-			default:
-				continue
+	for index, entry := range array_of_entry {
+		is_inventory := is_in(entry.Account, inventory) && entry.quantity < 0
+		if is_inventory {
+			if is_in(entry.Account, fifo) || is_in(entry.Account, wma) {
+				costs = cost_flow(entry.Account, entry.quantity, entry.barcode, "asc", false)
+			} else if is_in(entry.Account, lifo) {
+				costs = cost_flow(entry.Account, entry.quantity, entry.barcode, "desc", false)
 			}
-			array_of_entry[index] = Account_value_quantity_barcode{array_of_entry[index].Account, -costs, -quantity, array_of_entry[index].barcode}
-			if auto_completion {
-				array_of_entry = append(array_of_entry, Account_value_quantity_barcode{"cost of " + array_of_entry[index].Account, costs, quantity, array_of_entry[index].barcode}) // i should to append the array_of_entry and rerange it
-				array_of_entry = append(array_of_entry, price_discount_tax_list(array_of_entry[index].Account, quantity)...)
+			array_of_entry[index] = Account_value_quantity_barcode{entry.Account, -costs, entry.quantity, entry.barcode}
+		}
+		if auto_completion {
+			for _, complement := range s.auto_complete_entries {
+				if complement[0].account == entry.Account {
+					if !is_inventory {
+						array_of_entry[index] = Account_value_quantity_barcode{complement[0].account, complement[0].price * entry.quantity, entry.quantity, ""}
+					}
+					for _, i := range complement[1:] {
+						if i.value == 0 {
+							array_of_entry = append(array_of_entry, Account_value_quantity_barcode{i.account, i.price * entry.quantity * i.percent, entry.quantity * i.percent, ""})
+						} else {
+							array_of_entry = append(array_of_entry, Account_value_quantity_barcode{i.account, i.value, i.value / i.price, ""})
+						}
+					}
+					break
+				}
 			}
-		case auto_completion && is_in(array_of_entry[index].Account, service):
-			array_of_entry = append(array_of_entry, price_discount_tax_list(array_of_entry[index].Account, quantity)...)
-			array_of_entry = append(array_of_entry[:index], array_of_entry[index+1:]...)
-			total_invoice_before_invoice_discount += array_of_entry[index].value
-		case auto_completion && is_in(array_of_entry[index].Account, revenues):
-			total_invoice_before_invoice_discount += array_of_entry[index].value
-		case auto_completion && is_in(array_of_entry[index].Account, discounts):
-			total_invoice_before_invoice_discount -= array_of_entry[index].value
+		}
+	}
+	for _, entry := range array_of_entry {
+		if auto_completion && is_in(entry.Account, revenues) {
+			total_invoice_before_invoice_discount += entry.value
+		} else if auto_completion && is_in(entry.Account, discounts) {
+			total_invoice_before_invoice_discount -= entry.value
 		}
 	}
 	if auto_completion {
@@ -392,7 +335,7 @@ func journal_entry(array_of_entry []Account_value_quantity_barcode, auto_complet
 		}
 	}
 	if zero != 0 {
-		log.Panic(zero, " not equal 0 if the number>0 it means debit overstated else credit overstated debit-credit should equal zero")
+		log.Panic(zero, " not equal 0 if the number>0 it means debit overstated else credit overstated debit-credit should equal zero ", array_of_entry)
 	}
 
 	entry_number := entry_number()
@@ -415,40 +358,31 @@ func journal_entry(array_of_entry []Account_value_quantity_barcode, auto_complet
 		})
 	}
 
-	type key struct {
-		account  string
-		quantity float64
-	}
-	var invoice []invoice_tag
+	var invoice []account_value_price_percent
 	for _, entry := range array_to_insert {
 		switch {
 		case is_in(entry.account, assets_normal) && !is_in(entry.account, inventory) && entry.value > 0:
-			invoice = append(invoice, invoice_tag{entry.account, entry.value, entry.value, entry.price, 0, 0, entry.quantity})
-		case entry.account == "invoice discount":
-			invoice = append(invoice, invoice_tag{entry.account, -entry.value, 0, 0, entry.value, entry.price, entry.quantity})
-		case strings.Contains(entry.account, "discount of "):
-			invoice = append(invoice, invoice_tag{strings.Replace(entry.account, "discount of ", "", -1), -entry.value, 0, 0, entry.value, entry.price, entry.quantity})
-		case strings.Contains(entry.account, "revenue of "):
-			invoice = append(invoice, invoice_tag{strings.Replace(entry.account, "revenue of ", "", -1), entry.value, entry.value, entry.price, 0, 0, entry.quantity})
+			invoice = append(invoice, account_value_price_percent{"total", entry.value, entry.price, entry.quantity})
+		case is_in(entry.account, discounts):
+			invoice = append(invoice, account_value_price_percent{"total discounts", entry.value, entry.price, entry.quantity})
+		case is_in(entry.account, sales):
+			invoice = append(invoice, account_value_price_percent{entry.account, entry.value, entry.price, entry.quantity})
 		}
 	}
-	m := map[key]*invoice_tag{}
+	m := map[string]*account_value_price_percent{}
 	for _, i := range invoice {
-		k := key{i.account, i.quantity}
+		k := i.account
 		sums := m[k]
 		if sums == nil {
-			sums = &invoice_tag{}
+			sums = &account_value_price_percent{}
 			m[k] = sums
 		}
-		sums.value_after_discount += i.value_after_discount
 		sums.value += i.value
-		sums.price += i.price
-		sums.total_discount += i.total_discount
-		sums.discount += i.discount
+		sums.percent = i.percent
 	}
-	invoice = []invoice_tag{}
+	invoice = []account_value_price_percent{}
 	for k, v := range m {
-		invoice = append(invoice, invoice_tag{k.account, v.value_after_discount, v.value, v.price, v.total_discount, v.discount, k.quantity})
+		invoice = append(invoice, account_value_price_percent{k, v.value, v.value / v.percent, v.percent})
 	}
 
 	if is_in(adjusting_method, depreciation_methods[:]) {
@@ -603,6 +537,19 @@ func (s Financial_accounting) financial_statements(start_base_date, end_base_dat
 			sum_income = &statement{}
 			income_map[key_income] = sum_income
 		}
+
+		date, _ := time.Parse("2006-01-02 15:04:05.999999999 -0700 +03 m=+0.99999999", entry.date)
+		before_base_period := date.Before(start_base_date)
+		in_base_period := date.After(start_base_date) && date.Before(end_base_date)
+		before_period := date.Before(start_date)
+		in_period := date.After(start_date) && date.Before(end_date)
+		is_revenues := is_in(entry.account, revenues)
+		is_temporary_debit_accounts := is_in(entry.account, temporary_debit_accounts)
+		is_cash_and_cash_equivalent := is_in(entry.account, cash_and_cash_equivalent)
+		is_expenses := is_in(entry.account, expenses)
+		is_sales := is_in(entry.account, sales)
+		is_sales_returns_and_allowances := is_in(entry.account, sales_returns_and_allowances)
+
 		if number != entry.entry_number {
 			if ok_base {
 				for _, entry := range cash_base {
@@ -647,20 +594,6 @@ func (s Financial_accounting) financial_statements(start_base_date, end_base_dat
 			ok_base = false
 			ok = false
 		}
-		date, _ := time.Parse("2006-01-02 15:04:05.999999999 -0700 +03 m=+0.99999999", entry.date)
-		before_base_period := date.Before(start_base_date)
-		in_base_period := date.After(start_base_date) && date.Before(end_base_date)
-		before_period := date.Before(start_date)
-		in_period := date.After(start_date) && date.Before(end_date)
-		is_revenues := is_in(entry.account, revenues)
-		is_temporary_debit_accounts := is_in(entry.account, temporary_debit_accounts)
-		is_cash_and_cash_equivalent := is_in(entry.account, cash_and_cash_equivalent)
-		is_expenses := is_in(entry.account, expenses)
-		is_sales := is_in(entry.account, sales)
-		is_sales_returns_and_allowances := is_in(entry.account, sales_returns_and_allowances)
-
-		number = entry.entry_number
-
 		if is_in(entry.account, assets_normal) {
 			assets += entry.value
 			if before_base_period || in_base_period {
@@ -672,8 +605,8 @@ func (s Financial_accounting) financial_statements(start_base_date, end_base_dat
 				assets_base -= entry.value
 			}
 		}
-
-		if before_base_period {
+		switch {
+		case before_base_period:
 			switch {
 			case is_revenues:
 				retained_earnings.base_value += entry.value
@@ -683,8 +616,7 @@ func (s Financial_accounting) financial_statements(start_base_date, end_base_dat
 				sum_journal.base_value += entry.value
 				sum_journal.base_quantity += entry.quantity
 			}
-		}
-		if in_base_period {
+		case in_base_period:
 			sum_journal.base_value += entry.value
 			sum_journal.base_quantity += entry.quantity
 			if is_cash_and_cash_equivalent {
@@ -704,8 +636,7 @@ func (s Financial_accounting) financial_statements(start_base_date, end_base_dat
 			} else if is_sales_returns_and_allowances {
 				net_sales_base -= entry.value
 			}
-		}
-		if before_period {
+		case before_period:
 			switch {
 			case is_revenues:
 				retained_earnings.value += entry.value
@@ -715,8 +646,7 @@ func (s Financial_accounting) financial_statements(start_base_date, end_base_dat
 				sum_journal.value += entry.value
 				sum_journal.quantity += entry.quantity
 			}
-		}
-		if in_period {
+		case in_period:
 			sum_journal.value += entry.value
 			sum_journal.quantity += entry.quantity
 			if is_cash_and_cash_equivalent {
@@ -737,6 +667,7 @@ func (s Financial_accounting) financial_statements(start_base_date, end_base_dat
 				net_sales -= entry.value
 			}
 		}
+		number = entry.entry_number
 	}
 	balance_sheet := append(prepare_statement(journal_map, assets, assets_base), retained_earnings)
 	income_statements := prepare_statement(income_map, net_sales, net_sales_base)
@@ -814,22 +745,9 @@ func weighted_average(array_of_accounts []string) {
 	}
 }
 
-func price_discount_tax_list(account string, quantity float64) []Account_value_quantity_barcode {
-	var new_array []Account_value_quantity_barcode
-	for _, list := range price_discount_tax {
-		if list.Account == account {
-			new_array = append(new_array, Account_value_quantity_barcode{"revenue of " + account, list.Price * quantity, quantity, ""})
-			new_array = append(new_array, Account_value_quantity_barcode{"discount of " + account, list.Discount * quantity, quantity, ""})
-			new_array = append(new_array, Account_value_quantity_barcode{"tax of " + account, list.Tax * quantity, quantity, ""})
-			new_array = append(new_array, Account_value_quantity_barcode{"tax", list.Tax * quantity, quantity, ""})
-		}
-	}
-	return new_array
-}
-
 func entry_number() int {
 	var tag int
-	err = db.QueryRow("select max(entry_number) from journal").Scan(&tag)
+	err := db.QueryRow("select max(entry_number) from journal").Scan(&tag)
 	if err != nil {
 		tag = 0
 	}
@@ -862,6 +780,17 @@ func prepare_statement(journal_map map[string]*statement, amount, amount_base fl
 		})
 	}
 	return statement_sheet
+}
+
+func change_account_name(name, new_name string) {
+	var tag string
+	err := db.QueryRow("select account from journal where account=? limit 1", new_name).Scan(&tag)
+	if err == nil {
+		log.Panic("you can't change the name of [", name, "] to [", new_name, "] as new name because it used")
+	} else {
+		db.Exec("update journal set account=? where account=?", new_name, name)
+		db.Exec("update inventory set account=? where account=?", new_name, name)
+	}
 }
 
 func is_in(element string, elements []string) bool {
@@ -950,34 +879,10 @@ func discount_tax_calculator(price, discount_tax float64) float64 {
 	return discount_tax
 }
 
-func accounts_slice(args []directory_account_price_discount_tax) []string {
-	accounts_slice := []string{}
-	for _, i := range args {
-		accounts_slice = append(accounts_slice, i.Account)
-	}
-	return accounts_slice
-}
-
-func directory_account_slice(args []directory_account_price_discount_tax) []directory_account {
-	accounts_slice := []directory_account{}
-	for _, i := range args {
-		accounts_slice = append(accounts_slice, directory_account{i.directory_no, i.Account})
-	}
-	return accounts_slice
-}
-
 func accounts_name(args []directory_account) []string {
 	accounts_slice := []string{}
 	for _, i := range args {
 		accounts_slice = append(accounts_slice, i.account_name)
-	}
-	return accounts_slice
-}
-
-func accounts_directory(args []directory_account_price_discount_tax) [][]uint {
-	accounts_slice := [][]uint{}
-	for _, i := range args {
-		accounts_slice = append(accounts_slice, i.directory_no)
 	}
 	return accounts_slice
 }
@@ -1009,31 +914,33 @@ func main() {
 	v := Financial_accounting{
 		DriverName:                   "mysql",
 		DataSourceName:               "hashem:hashem@tcp(localhost)/",
-		Company_name:                 "hashem2",
-		Discount:                     0,
-		Invoice_discounts_tax_list:   [][3]float64{{5, -10, 0}, {50, -5, -5}},
-		Fifo:                         []directory_account_price_discount_tax{{[]uint{1, 3, 1}, "book1", 15, 0, 0}},
-		Lifo:                         []directory_account_price_discount_tax{{[]uint{1, 3, 2}, "book2", 15, 0, 0}},
-		Wma:                          []directory_account_price_discount_tax{{[]uint{1, 3, 3}, "book", 10, -1, -1}},
-		Service:                      []directory_account_price_discount_tax{{[]uint{4, 3, 4}, "service revenue", 2, -1, -1}},
+		Database_name:                "acc",
+		Invoice_discounts_tax_list:   [][3]float64{{10, -5, 0.01}, {0, 0, 0}},
 		retained_earnings:            [1]directory_account{{[]uint{4, 4}, "retained_earnings"}},
 		Assets_normal:                []directory_account{{[]uint{1, 1}, "office equipment"}, {[]uint{1}, "Assets_normal"}, {[]uint{1, 3}, "inventory"}},
 		Cash_and_cash_equivalent:     []directory_account{{[]uint{1, 8}, "cash"}},
+		Fifo:                         []directory_account{{[]uint{1, 3, 1}, "book1"}},
+		Lifo:                         []directory_account{{[]uint{1, 3, 2}, "book2"}},
+		Wma:                          []directory_account{{[]uint{1, 3, 3}, "book"}, {[]uint{1, 3, 4}, "book3"}},
 		Assets_contra:                []directory_account{},
 		Liabilities_normal:           []directory_account{{[]uint{2, 1}, "tax"}, {[]uint{2}, "Liabilities"}},
 		Liabilities_contra:           []directory_account{},
 		Equity_normal:                []directory_account{},
 		Equity_contra:                []directory_account{},
 		Withdrawals:                  []directory_account{},
-		Sales:                        []directory_account{{[]uint{4, 1}, "revenue of service revenue"}, {[]uint{4, 2}, "revenue of book"}},
+		Sales:                        []directory_account{{[]uint{4, 1}, "revenue of service revenue"}, {[]uint{4, 2}, "revenue of book"}, {[]uint{4, 3, 4}, "service revenue"}},
 		Revenues:                     []directory_account{{[]uint{4, 3}, "service"}, {[]uint{4}, "revenue"}},
 		Discounts:                    []directory_account{{[]uint{3, 1}, "discount of service revenue"}, {[]uint{3, 6}, "discount of book"}, {[]uint{3, 7}, "invoice discount"}},
 		Sales_returns_and_allowances: []directory_account{},
 		Expenses:                     []directory_account{{[]uint{3, 4}, "tax of service revenue"}, {[]uint{3, 2}, "expair_expenses"}, {[]uint{3, 3}, "cost of book"}, {[]uint{3, 5}, "tax of book"}, {[]uint{3, 8}, "invoice tax"}, {[]uint{3}, "expenses"}},
+		auto_complete_entries: [][]account_value_price_percent{
+			{{"service revenue", 0, 10, 1}, {"tax of service revenue", 1, 1, 0}, {"tax", 1, 1, 0}},
+			{{"book", 0, 0, 1}, {"revenue of book", 0, 10, -1}, {"cost of book", 0, 0, -1}, {"tax of book", 1, 1, 0}, {"discount of book", 1, 1, 0}},
+		},
 	}
 	v.initialize()
-	// entry, invoice, t, entry_number := journal_entry([]Account_value_quantity_barcode{{"cash", 9995, 9995, ""}, {"service revenue", 10, -10000, ""}}, true, 0 /*uint(entry_number())-1*/, Now,
-	// 	time.Date(2021, time.December, 31, 0, 0, 0, 0, time.Local), "linear", "", "yasa", "hashem", []day_start_end{})
+	// entry, invoice, t, entry_number := v.journal_entry([]Account_value_quantity_barcode{{"cash", 9, 9, ""}, {"book", 50, -1, ""}}, true, 0 /*uint(entry_number())-1*/, Now,
+	// 	time.Time{}, "", "", "yasa", "hashem", []day_start_end{})
 
 	// fmt.Println(invoice, t, entry_number)
 	// r := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
