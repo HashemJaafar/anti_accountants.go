@@ -250,7 +250,6 @@ func (s Financial_accounting) journal_entry(array_of_entry []Account_value_quant
 		db.Exec("delete from journal where reverse=True and date>?", Now.String())
 	}
 
-	var total_invoice_before_invoice_discount float64
 	var costs float64
 	for index, entry := range array_of_entry {
 		is_inventory := is_in(entry.Account, inventory) && entry.quantity < 0
@@ -280,14 +279,15 @@ func (s Financial_accounting) journal_entry(array_of_entry []Account_value_quant
 			}
 		}
 	}
-	for _, entry := range array_of_entry {
-		if auto_completion && is_in(entry.Account, revenues) {
-			total_invoice_before_invoice_discount += entry.value
-		} else if auto_completion && is_in(entry.Account, discounts) {
-			total_invoice_before_invoice_discount -= entry.value
-		}
-	}
 	if auto_completion {
+		var total_invoice_before_invoice_discount float64
+		for _, entry := range array_of_entry {
+			if is_in(entry.Account, revenues) {
+				total_invoice_before_invoice_discount += entry.value
+			} else if is_in(entry.Account, discounts) {
+				total_invoice_before_invoice_discount -= entry.value
+			}
+		}
 		var discount float64
 		var tax float64
 		for _, i := range invoice_discounts_tax_list {
