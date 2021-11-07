@@ -508,7 +508,7 @@ func (s Financial_accounting) financial_statements(start_base_date, end_base_dat
 	check_dates(start_date, end_date)
 	check_dates(end_base_date, start_date)
 	check_dates(start_base_date, end_base_date)
-	rows, _ := db.Query("select date,entry_number,account,value,quantity from journal")
+	rows, _ := db.Query("select date,entry_number,account,value,quantity from journal order by date")
 	var journal []journal_tag
 	for rows.Next() {
 		var tag journal_tag
@@ -516,11 +516,11 @@ func (s Financial_accounting) financial_statements(start_base_date, end_base_dat
 		journal = append(journal, tag)
 	}
 
-	retained_earnings := statement{directory_no: s.retained_earnings[0].directory_no, account: s.retained_earnings[0].account_name}
 	var cash, cash_base []journal_tag
-	var number int
+	var previous_date string
 	var ok, ok_base bool
 	var assets, assets_base, net_sales, net_sales_base, cash_increase, cash_increase_base float64
+	retained_earnings := statement{directory_no: s.retained_earnings[0].directory_no, account: s.retained_earnings[0].account_name}
 	journal_map := map[string]*statement{}
 	income_map := map[string]*statement{}
 	cash_map := map[string]*statement{}
@@ -538,23 +538,8 @@ func (s Financial_accounting) financial_statements(start_base_date, end_base_dat
 			income_map[key_income] = sum_income
 		}
 
-		date, _ := time.Parse("2006-01-02 15:04:05.999999999 -0700 +03 m=+0.99999999", entry.date)
-		before_base_period := date.Before(start_base_date)
-		in_base_period := date.After(start_base_date) && date.Before(end_base_date)
-		before_end_base_date := date.Before(end_base_date)
-		before_period := date.Before(start_date)
-		in_period := date.After(start_date) && date.Before(end_date)
-		before_end_date := date.Before(end_date)
-		is_revenues := is_in(entry.account, revenues)
-		is_temporary_debit_accounts := is_in(entry.account, temporary_debit_accounts)
-		is_cash_and_cash_equivalent := is_in(entry.account, cash_and_cash_equivalent)
-		is_expenses := is_in(entry.account, expenses)
-		is_sales := is_in(entry.account, sales)
-		is_sales_returns_and_allowances := is_in(entry.account, sales_returns_and_allowances)
-		is_assets_normal := is_in(entry.account, assets_normal)
-		is_assets_contra := is_in(entry.account, assets_contra)
-
-		if number != entry.entry_number {
+		date, _ := time.Parse("2006-01-02 15:04:05.999999999 -0700 +03", entry.date)
+		if previous_date != entry.date {
 			if ok_base {
 				for _, entry := range cash_base {
 					key_cash := entry.account
@@ -598,77 +583,78 @@ func (s Financial_accounting) financial_statements(start_base_date, end_base_dat
 			ok_base = false
 			ok = false
 		}
-		if before_base_period {
-			if is_revenues {
+		previous_date = entry.date
+
+		if date.Before(start_base_date) {
+			if is_in(entry.account, revenues) {
 				retained_earnings.base_value += entry.value
-			} else if is_temporary_debit_accounts {
+			} else if is_in(entry.account, temporary_debit_accounts) {
 				retained_earnings.base_value -= entry.value
 			}
 		}
-		if in_base_period {
-			if is_cash_and_cash_equivalent {
+		if date.After(start_base_date) && date.Before(end_base_date) {
+			if is_in(entry.account, cash_and_cash_equivalent) {
 				ok_base = true
 			} else {
 				cash_base = append(cash_base, entry)
 			}
-			if is_revenues {
+			if is_in(entry.account, revenues) {
 				sum_income.base_value += entry.value
 				sum_income.base_quantity += entry.quantity
-			} else if is_expenses {
+			} else if is_in(entry.account, expenses) {
 				sum_income.base_value += entry.value
 				sum_income.base_quantity += entry.quantity
 			}
-			if is_sales {
+			if is_in(entry.account, sales) {
 				net_sales_base += entry.value
-			} else if is_sales_returns_and_allowances {
+			} else if is_in(entry.account, sales_returns_and_allowances) {
 				net_sales_base -= entry.value
 			}
 		}
-		if before_end_base_date {
+		if date.Before(end_base_date) {
 			sum_journal.base_value += entry.value
 			sum_journal.base_quantity += entry.quantity
-			if is_assets_normal {
+			if is_in(entry.account, assets_normal) {
 				assets += entry.value
-			} else if is_assets_contra {
+			} else if is_in(entry.account, assets_contra) {
 				assets -= entry.value
 			}
 		}
-		if before_period {
-			if is_revenues {
+		if date.Before(start_date) {
+			if is_in(entry.account, revenues) {
 				retained_earnings.value += entry.value
-			} else if is_temporary_debit_accounts {
+			} else if is_in(entry.account, temporary_debit_accounts) {
 				retained_earnings.value -= entry.value
 			}
 		}
-		if in_period {
-			if is_cash_and_cash_equivalent {
+		if date.After(start_date) && date.Before(end_date) {
+			if is_in(entry.account, cash_and_cash_equivalent) {
 				ok = true
 			} else {
 				cash = append(cash, entry)
 			}
-			if is_revenues {
+			if is_in(entry.account, revenues) {
 				sum_income.value += entry.value
 				sum_income.quantity += entry.quantity
-			} else if is_expenses {
+			} else if is_in(entry.account, expenses) {
 				sum_income.value += entry.value
 				sum_income.quantity += entry.quantity
 			}
-			if is_sales {
+			if is_in(entry.account, sales) {
 				net_sales += entry.value
-			} else if is_sales_returns_and_allowances {
+			} else if is_in(entry.account, sales_returns_and_allowances) {
 				net_sales -= entry.value
 			}
 		}
-		if before_end_date {
+		if date.Before(end_date) {
 			sum_journal.value += entry.value
 			sum_journal.quantity += entry.quantity
-			if is_assets_normal {
+			if is_in(entry.account, assets_normal) {
 				assets += entry.value
-			} else if is_assets_contra {
+			} else if is_in(entry.account, assets_contra) {
 				assets -= entry.value
 			}
 		}
-		number = entry.entry_number
 	}
 	balance_sheet := append(prepare_statement(journal_map, assets, assets_base), retained_earnings)
 	income_statements := prepare_statement(income_map, net_sales, net_sales_base)
@@ -940,8 +926,8 @@ func main() {
 		},
 	}
 	v.initialize()
-	// entry, invoice, t, entry_number := v.journal_entry([]Account_value_quantity_barcode{{"cash", 9, 9, ""}, {"book", 50, -1, ""}}, true, 0 /*uint(entry_number())-1*/, Now,
-	// 	time.Time{}, "", "", "yasa", "hashem", []day_start_end{})
+	// entry, invoice, t, entry_number := v.journal_entry([]Account_value_quantity_barcode{{"cash", 100000, 100000, ""}, {"service revenue", 50, 10000, ""}}, true, 0 /*uint(entry_number())-1*/, time.Date(2020, time.January, 1, 0, 0, 0, 0, time.Local),
+	// 	time.Date(2022, time.January, 1, 0, 0, 0, 0, time.Local), "linear", "", "yasa", "hashem", []day_start_end{})
 
 	// fmt.Println(invoice, t, entry_number)
 	// r := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
@@ -951,10 +937,10 @@ func main() {
 	// r.Flush()
 
 	balance_sheet, income_statements, cash_flow := v.financial_statements(
-		time.Date(2020, time.May, 20, 13, 00, 00, 00, time.Local),
-		time.Date(2020, time.May, 20, 13, 00, 00, 00, time.Local),
-		time.Date(2020, time.May, 20, 13, 00, 00, 00, time.Local),
-		time.Date(2023, time.May, 20, 13, 00, 00, 00, time.Local),
+		time.Date(2019, time.January, 1, 0, 0, 0, 0, time.Local),
+		time.Date(2019, time.January, 1, 0, 0, 0, 0, time.Local),
+		time.Date(2019, time.January, 1, 0, 0, 0, 0, time.Local),
+		time.Date(2023, time.January, 1, 0, 0, 0, 0, time.Local),
 		true)
 
 	w := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
