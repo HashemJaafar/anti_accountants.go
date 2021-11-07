@@ -541,14 +541,18 @@ func (s Financial_accounting) financial_statements(start_base_date, end_base_dat
 		date, _ := time.Parse("2006-01-02 15:04:05.999999999 -0700 +03 m=+0.99999999", entry.date)
 		before_base_period := date.Before(start_base_date)
 		in_base_period := date.After(start_base_date) && date.Before(end_base_date)
+		before_end_base_date := date.Before(end_base_date)
 		before_period := date.Before(start_date)
 		in_period := date.After(start_date) && date.Before(end_date)
+		before_end_date := date.Before(end_date)
 		is_revenues := is_in(entry.account, revenues)
 		is_temporary_debit_accounts := is_in(entry.account, temporary_debit_accounts)
 		is_cash_and_cash_equivalent := is_in(entry.account, cash_and_cash_equivalent)
 		is_expenses := is_in(entry.account, expenses)
 		is_sales := is_in(entry.account, sales)
 		is_sales_returns_and_allowances := is_in(entry.account, sales_returns_and_allowances)
+		is_assets_normal := is_in(entry.account, assets_normal)
+		is_assets_contra := is_in(entry.account, assets_contra)
 
 		if number != entry.entry_number {
 			if ok_base {
@@ -594,31 +598,14 @@ func (s Financial_accounting) financial_statements(start_base_date, end_base_dat
 			ok_base = false
 			ok = false
 		}
-		if is_in(entry.account, assets_normal) {
-			assets += entry.value
-			if before_base_period || in_base_period {
-				assets_base += entry.value
-			}
-		} else if is_in(entry.account, assets_contra) {
-			assets -= entry.value
-			if before_base_period || in_base_period {
-				assets_base -= entry.value
+		if before_base_period {
+			if is_revenues {
+				retained_earnings.base_value += entry.value
+			} else if is_temporary_debit_accounts {
+				retained_earnings.base_value -= entry.value
 			}
 		}
-		switch {
-		case before_base_period:
-			switch {
-			case is_revenues:
-				retained_earnings.base_value += entry.value
-			case is_temporary_debit_accounts:
-				retained_earnings.base_value -= entry.value
-			default:
-				sum_journal.base_value += entry.value
-				sum_journal.base_quantity += entry.quantity
-			}
-		case in_base_period:
-			sum_journal.base_value += entry.value
-			sum_journal.base_quantity += entry.quantity
+		if in_base_period {
 			if is_cash_and_cash_equivalent {
 				ok_base = true
 			} else {
@@ -636,19 +623,24 @@ func (s Financial_accounting) financial_statements(start_base_date, end_base_dat
 			} else if is_sales_returns_and_allowances {
 				net_sales_base -= entry.value
 			}
-		case before_period:
-			switch {
-			case is_revenues:
-				retained_earnings.value += entry.value
-			case is_temporary_debit_accounts:
-				retained_earnings.value -= entry.value
-			default:
-				sum_journal.value += entry.value
-				sum_journal.quantity += entry.quantity
+		}
+		if before_end_base_date {
+			sum_journal.base_value += entry.value
+			sum_journal.base_quantity += entry.quantity
+			if is_assets_normal {
+				assets += entry.value
+			} else if is_assets_contra {
+				assets -= entry.value
 			}
-		case in_period:
-			sum_journal.value += entry.value
-			sum_journal.quantity += entry.quantity
+		}
+		if before_period {
+			if is_revenues {
+				retained_earnings.value += entry.value
+			} else if is_temporary_debit_accounts {
+				retained_earnings.value -= entry.value
+			}
+		}
+		if in_period {
 			if is_cash_and_cash_equivalent {
 				ok = true
 			} else {
@@ -665,6 +657,15 @@ func (s Financial_accounting) financial_statements(start_base_date, end_base_dat
 				net_sales += entry.value
 			} else if is_sales_returns_and_allowances {
 				net_sales -= entry.value
+			}
+		}
+		if before_end_date {
+			sum_journal.value += entry.value
+			sum_journal.quantity += entry.quantity
+			if is_assets_normal {
+				assets += entry.value
+			} else if is_assets_contra {
+				assets -= entry.value
 			}
 		}
 		number = entry.entry_number
