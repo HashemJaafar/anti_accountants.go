@@ -128,8 +128,7 @@ func (s Financial_accounting) initialize() {
 
 	entry_number := entry_number()
 	var array_to_insert []journal_tag
-	expair_expenses := journal_tag{Now.String(), entry_number, "expair_expenses", 0, 0, 0, "", time.Time{}.String(),
-		"to record the expiry of the goods automatically", "", "", Now.String(), false}
+	expair_expenses := journal_tag{Now.String(), entry_number, "expair_expenses", 0, 0, 0, "", time.Time{}.String(), "to record the expiry of the goods automatically", "", "", Now.String(), false}
 	expair_goods, _ := db.Query("select account,price*quantity*-1,price,quantity*-1,barcode from inventory where entry_expair<? and entry_expair!='0001-01-01 00:00:00 +0000 UTC'", Now.String())
 	for expair_goods.Next() {
 		tag := expair_expenses
