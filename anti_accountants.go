@@ -153,7 +153,7 @@ func (s Financial_accounting) initialize() {
 
 	all_directory_account = concat(s.retained_earnings[:], s.Assets_normal, s.Cash_and_cash_equivalent, s.Fifo, s.Lifo, s.Wma, s.Assets_contra, s.Liabilities_normal, s.Liabilities_contra,
 		s.Equity_normal, s.Equity_contra, s.Withdrawals, s.Sales, s.Revenues, s.Discounts, s.Sales_returns_and_allowances, s.Expenses).([]directory_account)
-	all_directorys := concat(accounts_directory1(all_directory_account)).([][]uint)
+	all_directorys := concat(accounts_directory(all_directory_account)).([][]uint)
 	check_if_duplicates_directory(all_directorys)
 	check_if_duplicates(all_accounts)
 
@@ -538,7 +538,10 @@ func (s Financial_accounting) financial_statements(start_base_date, end_base_dat
 			income_map[key_income] = sum_income
 		}
 
-		date, _ := time.Parse("2006-01-02 15:04:05.999999999 -0700 +03", entry.date)
+		date, err := time.Parse("2006-01-02 15:04:05.999999999 -0700 +03 m=+0.999999999", entry.date)
+		if err != nil {
+			date, _ = time.Parse("2006-01-02 15:04:05.999999999 -0700 +03", entry.date)
+		}
 		if previous_date != entry.date {
 			if ok_base {
 				for _, entry := range cash_base {
@@ -874,7 +877,7 @@ func accounts_name(args []directory_account) []string {
 	return accounts_slice
 }
 
-func accounts_directory1(args []directory_account) [][]uint {
+func accounts_directory(args []directory_account) [][]uint {
 	accounts_slice := [][]uint{}
 	for _, i := range args {
 		accounts_slice = append(accounts_slice, i.directory_no)
