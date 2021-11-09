@@ -51,7 +51,7 @@ type Financial_accounting struct {
 	DriverName, DataSourceName, Database_name string
 	Invoice_discounts_tax_list                [][3]float64
 	retained_earnings                         [1]directory_account
-	Assets_normal, Cash_and_cash_equivalent, Fifo, Lifo, Wma, Assets_contra, Liabilities_normal, Liabilities_contra,
+	Assets_normal, Current_assets, Cash_and_cash_equivalent, Fifo, Lifo, Wma, Short_term_investments, Assets_contra, Liabilities_normal, Current_liabilities, Liabilities_contra,
 	Equity_normal, Equity_contra, Withdrawals, Sales, Revenues, Discounts, Sales_returns_and_allowances, Expenses []directory_account
 	auto_complete_entries [][]account_value_price_percent
 }
@@ -673,56 +673,62 @@ func (s Financial_accounting) financial_statements(start_base_date, end_base_dat
 		}
 	}
 
+	var v_current_assets, v_current_liabilities, v_cash, v_short_term_investments, v_net_receivables, v_net_credit_sales, v_average_net_receivables, v_cost_of_goods_sold, v_average_inventory, v_net_income, v_net_sales,
+		v_average_assets, v_preferred_dividends, v_average_common_stockholders_equity, v_weighted_average_common_shares_outstanding, v_market_price_per_shares_outstanding, v_cash_dividends, v_total_debt, v_total_assets,
+		v_income_before_income_taxes_and_interest_expense, v_interest_expense, v_current_assets_base, v_current_liabilities_base, v_cash_base, v_short_term_investments_base, v_net_receivables_base, v_net_credit_sales_base,
+		v_average_net_receivables_base, v_cost_of_goods_sold_base, v_average_inventory_base, v_net_income_base, v_net_sales_base, v_average_assets_base, v_preferred_dividends_base, v_average_common_stockholders_equity_base,
+		v_weighted_average_common_shares_outstanding_base, v_market_price_per_shares_outstanding_base, v_cash_dividends_base, v_total_debt_base, v_total_assets_base, v_income_before_income_taxes_and_interest_expense_base,
+		v_interest_expense_base float64
 	for k, v := range journal_map {
 		if is_in(k, cash_and_cash_equivalent) {
 			fmt.Println(v.value)
 		}
 	}
 	c := financial_analysis{
-		current_assets:                     assets,
-		current_liabilities:                0,
-		cash:                               cash_increase,
-		short_term_investments:             0,
-		net_receivables:                    0,
-		net_credit_sales:                   net_sales,
-		average_net_receivables:            0,
-		cost_of_goods_sold:                 0,
-		average_inventory:                  0,
-		net_income:                         0,
-		net_sales:                          net_sales,
-		average_assets:                     assets,
-		preferred_dividends:                0,
-		average_common_stockholders_equity: 0,
-		weighted_average_common_shares_outstanding:      0,
-		market_price_per_shares_outstanding:             0,
-		cash_dividends:                                  0,
-		total_debt:                                      0,
-		total_assets:                                    assets,
-		income_before_income_taxes_and_interest_expense: 0,
-		interest_expense:                                0,
+		current_assets:                     v_current_assets,
+		current_liabilities:                v_current_liabilities,
+		cash:                               v_cash,
+		short_term_investments:             v_short_term_investments,
+		net_receivables:                    v_net_receivables,
+		net_credit_sales:                   v_net_credit_sales,
+		average_net_receivables:            v_average_net_receivables,
+		cost_of_goods_sold:                 v_cost_of_goods_sold,
+		average_inventory:                  v_average_inventory,
+		net_income:                         v_net_income,
+		net_sales:                          v_net_sales,
+		average_assets:                     v_average_assets,
+		preferred_dividends:                v_preferred_dividends,
+		average_common_stockholders_equity: v_average_common_stockholders_equity,
+		weighted_average_common_shares_outstanding:      v_weighted_average_common_shares_outstanding,
+		market_price_per_shares_outstanding:             v_market_price_per_shares_outstanding,
+		cash_dividends:                                  v_cash_dividends,
+		total_debt:                                      v_total_debt,
+		total_assets:                                    v_total_assets,
+		income_before_income_taxes_and_interest_expense: v_income_before_income_taxes_and_interest_expense,
+		interest_expense:                                v_interest_expense,
 	}
 	b := financial_analysis{
-		current_assets:                     assets,
-		current_liabilities:                0,
-		cash:                               cash_increase,
-		short_term_investments:             0,
-		net_receivables:                    0,
-		net_credit_sales:                   net_sales,
-		average_net_receivables:            0,
-		cost_of_goods_sold:                 0,
-		average_inventory:                  0,
-		net_income:                         0,
-		net_sales:                          net_sales,
-		average_assets:                     assets,
-		preferred_dividends:                0,
-		average_common_stockholders_equity: 0,
-		weighted_average_common_shares_outstanding:      0,
-		market_price_per_shares_outstanding:             0,
-		cash_dividends:                                  0,
-		total_debt:                                      0,
-		total_assets:                                    assets,
-		income_before_income_taxes_and_interest_expense: 0,
-		interest_expense:                                0,
+		current_assets:                     v_current_assets_base,
+		current_liabilities:                v_current_liabilities_base,
+		cash:                               v_cash_base,
+		short_term_investments:             v_short_term_investments_base,
+		net_receivables:                    v_net_receivables_base,
+		net_credit_sales:                   v_net_credit_sales_base,
+		average_net_receivables:            v_average_net_receivables_base,
+		cost_of_goods_sold:                 v_cost_of_goods_sold_base,
+		average_inventory:                  v_average_inventory_base,
+		net_income:                         v_net_income_base,
+		net_sales:                          v_net_sales_base,
+		average_assets:                     v_average_assets_base,
+		preferred_dividends:                v_preferred_dividends_base,
+		average_common_stockholders_equity: v_average_common_stockholders_equity_base,
+		weighted_average_common_shares_outstanding:      v_weighted_average_common_shares_outstanding_base,
+		market_price_per_shares_outstanding:             v_market_price_per_shares_outstanding_base,
+		cash_dividends:                                  v_cash_dividends_base,
+		total_debt:                                      v_total_debt_base,
+		total_assets:                                    v_total_assets_base,
+		income_before_income_taxes_and_interest_expense: v_income_before_income_taxes_and_interest_expense_base,
+		interest_expense:                                v_interest_expense_base,
 	}
 	analysis := []financial_analysis_statement{
 		{"current_ratio", c.current_ratio(), b.current_ratio(), "current_assets / current_liabilities", "Measures short-term debt-paying ability"},
@@ -733,7 +739,7 @@ func (s Financial_accounting) financial_statements(start_base_date, end_base_dat
 		{"asset_turnover", c.asset_turnover(), b.asset_turnover(), "net_sales / average_assets", "Measures how efficiently assets are used to generate sales"},
 		{"return_on_assets", c.return_on_assets(), b.return_on_assets(), "net_income / average_assets", "Measures overall profitability of assets"},
 		{"return_on_common_stockholders_equity", c.return_on_common_stockholders_equity(), b.return_on_common_stockholders_equity(), "(net_income - preferred_dividends) / average_common_stockholders_equity", "Measures profitability of owners investment"},
-		{"earnings_per_share", c.earnings_per_share(), b.earnings_per_share(), "(net_income - preferred_dividends) / weighted_average_common_shares_outstanding", "Measures net income earned on each share of commen stock"},
+		{"earnings_per_share", c.earnings_per_share(), b.earnings_per_share(), "(net_income - preferred_dividends) / weighted_average_common_shares_outstanding", "Measures net income earned on each share of common stock"},
 		{"price_earnings_ratio", c.price_earnings_ratio(), b.price_earnings_ratio(), "market_price_per_shares_outstanding / ((net_income - preferred_dividends) / weighted_average_common_shares_outstanding)", "Measures the ratio of the market price per share to earnings per share"},
 		{"payout_ratio", c.payout_ratio(), b.payout_ratio(), "cash_dividends / net_income", "Measures percentage of earnings distributed in the form of cash dividends"},
 		{"debt_to_total_assets_ratio", c.debt_to_total_assets_ratio(), b.debt_to_total_assets_ratio(), "total_debt / total_assets", "Measures the percentage of total assets provided by creditors"},
@@ -786,7 +792,7 @@ func (s financial_analysis) return_on_common_stockholders_equity() float64 {
 	return (s.net_income - s.preferred_dividends) / s.average_common_stockholders_equity
 }
 
-// (net_income - preferred_dividends) / weighted_average_common_shares_outstanding Measures net income earned on each share of commen stock
+// (net_income - preferred_dividends) / weighted_average_common_shares_outstanding Measures net income earned on each share of common stock
 func (s financial_analysis) earnings_per_share() float64 {
 	return (s.net_income - s.preferred_dividends) / s.weighted_average_common_shares_outstanding
 }
