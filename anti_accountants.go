@@ -157,12 +157,8 @@ func (s Financial_accounting) initialize() {
 	db.Exec("delete from inventory where entry_expair<? and entry_expair!='0001-01-01 00:00:00 +0000 UTC'", Now.String())
 	db.Exec("delete from inventory where quantity=0")
 
-	accounts := column_values("account")
-	for _, account := range accounts {
-		if !is_in(account, all_accounts) {
-			log.Panic(account + " is not on parameters accounts lists")
-		}
-	}
+	check_accounts("account", "inventory", " is not on fifo lifo wma parameters accounts lists", inventory)
+	check_accounts("account", "journal", " is not on parameters accounts lists", all_accounts)
 
 	all_directory_account = concat(s.retained_earnings[:], s.Assets_normal, s.Cash_and_cash_equivalent, s.Fifo, s.Lifo, s.Wma, s.Assets_contra, s.Liabilities_normal, s.Liabilities_contra,
 		s.Equity_normal, s.Equity_contra, s.Withdrawals, s.Sales, s.Revenues, s.Discounts, s.Sales_returns_and_allowances, s.Expenses).([]directory_account)
@@ -532,7 +528,6 @@ func (s Financial_accounting) financial_statements(start_base_date, end_base_dat
 	var cash, cash_base []journal_tag
 	var previous_date string
 	var ok, ok_base bool
-	var assets, assets_base, net_sales, net_sales_base, cash_increase, cash_increase_base float64
 	retained_earnings := statement{directory_no: s.retained_earnings[0].directory_no, account: s.retained_earnings[0].account_name}
 	journal_map := map[string]*statement{}
 	income_map := map[string]*statement{}
@@ -567,11 +562,9 @@ func (s Financial_accounting) financial_statements(start_base_date, end_base_dat
 					if is_in(entry.account, credit_accounts) {
 						sum_cash.base_value += entry.value
 						sum_cash.base_quantity += entry.quantity
-						cash_increase_base += entry.value
 					} else {
 						sum_cash.base_value -= entry.value
 						sum_cash.base_quantity -= entry.quantity
-						cash_increase_base -= entry.value
 					}
 				}
 			}
@@ -586,11 +579,9 @@ func (s Financial_accounting) financial_statements(start_base_date, end_base_dat
 					if is_in(entry.account, credit_accounts) {
 						sum_cash.value += entry.value
 						sum_cash.quantity += entry.quantity
-						cash_increase += entry.value
 					} else {
 						sum_cash.value -= entry.value
 						sum_cash.quantity -= entry.quantity
-						cash_increase -= entry.value
 					}
 				}
 			}
@@ -621,20 +612,10 @@ func (s Financial_accounting) financial_statements(start_base_date, end_base_dat
 				sum_income.base_value += entry.value
 				sum_income.base_quantity += entry.quantity
 			}
-			if is_in(entry.account, sales) {
-				net_sales_base += entry.value
-			} else if is_in(entry.account, sales_returns_and_allowances) {
-				net_sales_base -= entry.value
-			}
 		}
 		if date.Before(end_base_date) {
 			sum_journal.base_value += entry.value
 			sum_journal.base_quantity += entry.quantity
-			if is_in(entry.account, assets_normal) {
-				assets += entry.value
-			} else if is_in(entry.account, assets_contra) {
-				assets -= entry.value
-			}
 		}
 		if date.Before(start_date) {
 			if is_in(entry.account, revenues) {
@@ -656,20 +637,10 @@ func (s Financial_accounting) financial_statements(start_base_date, end_base_dat
 				sum_income.value += entry.value
 				sum_income.quantity += entry.quantity
 			}
-			if is_in(entry.account, sales) {
-				net_sales += entry.value
-			} else if is_in(entry.account, sales_returns_and_allowances) {
-				net_sales -= entry.value
-			}
 		}
 		if date.Before(end_date) {
 			sum_journal.value += entry.value
 			sum_journal.quantity += entry.quantity
-			if is_in(entry.account, assets_normal) {
-				assets += entry.value
-			} else if is_in(entry.account, assets_contra) {
-				assets -= entry.value
-			}
 		}
 	}
 
@@ -679,9 +650,36 @@ func (s Financial_accounting) financial_statements(start_base_date, end_base_dat
 		v_average_net_receivables_base, v_cost_of_goods_sold_base, v_average_inventory_base, v_net_income_base, v_net_sales_base, v_average_assets_base, v_preferred_dividends_base, v_average_common_stockholders_equity_base,
 		v_weighted_average_common_shares_outstanding_base, v_market_price_per_shares_outstanding_base, v_cash_dividends_base, v_total_debt_base, v_total_assets_base, v_income_before_income_taxes_and_interest_expense_base,
 		v_interest_expense_base float64
-	for k, v := range journal_map {
-		if is_in(k, cash_and_cash_equivalent) {
-			fmt.Println(v.value)
+	var cash_increase, cash_increase_base float64
+	for key, v := range journal_map {
+		if is_in(key, cash_and_cash_equivalent) {
+			v_cash += v.value
+			v_cash_base += v.base_value
+		}
+		if is_in(key, assets_normal) {
+			v_total_assets += v.value
+			v_total_assets_base += v.base_value
+		} else if is_in(key, assets_contra) {
+			v_total_assets = v.value
+			v_total_assets_base -= v.base_value
+		}
+	}
+	for key, v := range income_map {
+		if is_in(key, sales) {
+			v_net_sales += v.value
+			v_net_sales_base += v.base_value
+		} else if is_in(key, sales_returns_and_allowances) {
+			v_net_sales -= v.value
+			v_net_sales_base -= v.base_value
+		}
+	}
+	for key, v := range cash_map {
+		if is_in(key, credit_accounts) {
+			cash_increase += v.value
+			cash_increase_base += v.base_value
+		} else {
+			cash_increase -= v.value
+			cash_increase_base -= v.base_value
 		}
 	}
 	c := financial_analysis{
@@ -746,8 +744,8 @@ func (s Financial_accounting) financial_statements(start_base_date, end_base_dat
 		{"times_interest_earned", c.times_interest_earned(), b.times_interest_earned(), "income_before_income_taxes_and_interest_expense / interest_expense", "Measures ability to meet interest payments as they come due"},
 	}
 
-	balance_sheet := append(prepare_statement(journal_map, assets, assets_base), retained_earnings)
-	income_statements := prepare_statement(income_map, net_sales, net_sales_base)
+	balance_sheet := append(prepare_statement(journal_map, v_total_assets, v_total_assets_base), retained_earnings)
+	income_statements := prepare_statement(income_map, v_net_sales, v_net_sales_base)
 	cash_flow := prepare_statement(cash_map, cash_increase, cash_increase_base)
 	return balance_sheet, income_statements, cash_flow, analysis
 }
@@ -944,16 +942,16 @@ func is_in(element string, elements []string) bool {
 	return false
 }
 
-func column_values(column string) []string {
-	results, err := db.Query("select " + column + " from journal")
+func check_accounts(column, table, panic string, elements []string) {
+	results, err := db.Query("select " + column + " from " + table)
 	error_fatal(err)
-	column_values := []string{}
 	for results.Next() {
 		var tag string
 		results.Scan(&tag)
-		column_values = append(column_values, tag)
+		if !is_in(tag, elements) {
+			log.Panic(tag + panic)
+		}
 	}
-	return column_values
 }
 
 func error_fatal(err error) {
@@ -1081,8 +1079,8 @@ func main() {
 		},
 	}
 	v.initialize()
-	// entry, invoice, t, entry_number := v.journal_entry([]Account_value_quantity_barcode{{"cash", 100000, 100000, ""}, {"service revenue", 50, 10000, ""}}, true, 0 /*uint(entry_number())-1*/, time.Date(2020, time.January, 1, 0, 0, 0, 0, time.Local),
-	// 	time.Date(2022, time.January, 1, 0, 0, 0, 0, time.Local), "linear", "", "yasa", "hashem", []day_start_end{})
+	// entry, invoice, t, entry_number := v.journal_entry([]Account_value_quantity_barcode{{"cash", -1000, -1000, ""}, {"book2", 1000, 500, ""}}, true, 0 /*uint(entry_number())-1*/, time.Date(2020, time.January, 1, 0, 0, 0, 0, time.Local),
+	// 	time.Time{}, "", "", "yasa", "hashem", []day_start_end{})
 
 	// fmt.Println(invoice, t, entry_number)
 	// r := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
