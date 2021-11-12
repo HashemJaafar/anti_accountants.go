@@ -248,7 +248,7 @@ func (s Financial_accounting) journal_entry(array_of_entry []Account_value_quant
 		}
 		if auto_completion {
 			for _, complement := range s.auto_complete_entries {
-				if complement[0].account == entry.Account {
+				if complement[0].account == entry.Account && (entry.quantity > 0) == (complement[0].value_or_percent > 0) {
 					if costs == 0 {
 						array_of_entry[index] = Account_value_quantity_barcode{complement[0].account, complement[0].price * entry.quantity, entry.quantity, ""}
 					}
@@ -1109,40 +1109,40 @@ func main() {
 		},
 	}
 	v.initialize()
-	// entry := v.journal_entry([]Account_value_quantity_barcode{{"service revenue", -10, 10, ""}, {"cash", 100, 100, ""}}, true, time.Date(2020, time.January, 1, 0, 0, 0, 0, time.Local),
-	// 	time.Time{}, "", "", "yasa", "hashem", []day_start_end{})
+	entry := v.journal_entry([]Account_value_quantity_barcode{{"book", 10, 10, ""}, {"cash", -10, -10, ""}}, true, time.Date(2020, time.January, 1, 0, 0, 0, 0, time.Local),
+		time.Time{}, "", "", "yasa", "hashem", []day_start_end{})
 	// insert_to_database(entry, true, true, true)
 
 	// entry := select_journal(2, time.Time{}, time.Date(2026, time.January, 1, 0, 0, 0, 0, time.Local))
 	// fmt.Println(invoice(entry))
 	// reverse_entry(2, time.Time{}, time.Date(2026, time.January, 1, 0, 0, 0, 0, time.Local), time.Date(2025, time.January, 1, 0, 0, 0, 0, time.Local), "hashem")
-	// r := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
-	// for _, i := range entry {
-	// 	fmt.Fprintln(r, "\t", i.date, "\t", i.entry_number, "\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.barcode, "\t", i.entry_expair, "\t", i.description, "\t", i.name, "\t", i.employee_name, "\t", i.entry_date, "\t", i.reverse)
+	r := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
+	for _, i := range entry {
+		fmt.Fprintln(r, "\t", i.date, "\t", i.entry_number, "\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.barcode, "\t", i.entry_expair, "\t", i.description, "\t", i.name, "\t", i.employee_name, "\t", i.entry_date, "\t", i.reverse)
+	}
+	r.Flush()
+
+	// balance_sheet, income_statements, cash_flow, analysis := v.financial_statements(
+	// 	time.Date(2019, time.January, 1, 0, 0, 0, 0, time.Local),
+	// 	time.Date(2019, time.January, 1, 0, 0, 0, 0, time.Local),
+	// 	time.Date(2019, time.January, 1, 0, 0, 0, 0, time.Local),
+	// 	time.Date(2023, time.January, 1, 0, 0, 0, 0, time.Local),
+	// 	true)
+
+	// w := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
+
+	// for _, i := range balance_sheet {
+	// 	fmt.Fprintln(w, "balance_sheet\t", i.directory_no, "\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.percent, "\t", i.average, "\t", i.base_value, "\t", i.base_price, "\t", i.base_quantity, "\t", i.base_percent, "\t", i.average, "\t", i.changes_since_base_period, "\t", i.current_period_in_relation_to_base_period, "\t")
 	// }
-	// r.Flush()
-
-	balance_sheet, income_statements, cash_flow, analysis := v.financial_statements(
-		time.Date(2019, time.January, 1, 0, 0, 0, 0, time.Local),
-		time.Date(2019, time.January, 1, 0, 0, 0, 0, time.Local),
-		time.Date(2019, time.January, 1, 0, 0, 0, 0, time.Local),
-		time.Date(2023, time.January, 1, 0, 0, 0, 0, time.Local),
-		true)
-
-	w := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
-
-	for _, i := range balance_sheet {
-		fmt.Fprintln(w, "balance_sheet\t", i.directory_no, "\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.percent, "\t", i.average, "\t", i.base_value, "\t", i.base_price, "\t", i.base_quantity, "\t", i.base_percent, "\t", i.average, "\t", i.changes_since_base_period, "\t", i.current_period_in_relation_to_base_period, "\t")
-	}
-	for _, i := range income_statements {
-		fmt.Fprintln(w, "income_statements\t", i.directory_no, "\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.percent, "\t", i.average, "\t", i.base_value, "\t", i.base_price, "\t", i.base_quantity, "\t", i.base_percent, "\t", i.average, "\t", i.changes_since_base_period, "\t", i.current_period_in_relation_to_base_period, "\t")
-	}
-	for _, i := range cash_flow {
-		fmt.Fprintln(w, "cash_flow\t", i.directory_no, "\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.percent, "\t", i.average, "\t", i.base_value, "\t", i.base_price, "\t", i.base_quantity, "\t", i.base_percent, "\t", i.average, "\t", i.changes_since_base_period, "\t", i.current_period_in_relation_to_base_period, "\t")
-	}
-	fmt.Fprintln(w, "######################################################################### analysis ##########################################################################")
-	for _, i := range analysis {
-		fmt.Fprintln(w, i.ratio, "\t", i.current_value, "\t", i.base_value, "\t", i.formula, "\t", i.purpose_or_use)
-	}
-	w.Flush()
+	// for _, i := range income_statements {
+	// 	fmt.Fprintln(w, "income_statements\t", i.directory_no, "\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.percent, "\t", i.average, "\t", i.base_value, "\t", i.base_price, "\t", i.base_quantity, "\t", i.base_percent, "\t", i.average, "\t", i.changes_since_base_period, "\t", i.current_period_in_relation_to_base_period, "\t")
+	// }
+	// for _, i := range cash_flow {
+	// 	fmt.Fprintln(w, "cash_flow\t", i.directory_no, "\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.percent, "\t", i.average, "\t", i.base_value, "\t", i.base_price, "\t", i.base_quantity, "\t", i.base_percent, "\t", i.average, "\t", i.changes_since_base_period, "\t", i.current_period_in_relation_to_base_period, "\t")
+	// }
+	// fmt.Fprintln(w, "######################################################################### analysis ##########################################################################")
+	// for _, i := range analysis {
+	// 	fmt.Fprintln(w, i.ratio, "\t", i.current_value, "\t", i.base_value, "\t", i.formula, "\t", i.purpose_or_use)
+	// }
+	// w.Flush()
 }
