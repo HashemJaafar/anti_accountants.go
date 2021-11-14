@@ -37,11 +37,6 @@ type Account_value_quantity_barcode struct {
 	barcode  string
 }
 
-type directory_account struct {
-	directory_no []uint
-	account_name string
-}
-
 type account_method_value_price struct {
 	account, method         string
 	value_or_percent, price float64
@@ -55,9 +50,9 @@ type invoice_struct struct {
 type Financial_accounting struct {
 	DriverName, DataSourceName, Database_name string
 	Invoice_discounts_tax_list                [][3]float64
-	retained_earnings                         [1]directory_account
+	retained_earnings_and_income_summary      [2]string
 	Assets_normal, Current_assets, Cash_and_cash_equivalent, Fifo, Lifo, Wma, Short_term_investments, Receivables, Assets_contra, Allowance_for_Doubtful_Accounts, Liabilities_normal, Current_liabilities, Liabilities_contra,
-	Equity_normal, Equity_contra, Withdrawals, Sales, Revenues, Discounts, Sales_returns_and_allowances, Expenses []directory_account
+	Equity_normal, Equity_contra, Withdrawals, Sales, Revenues, Discounts, Sales_returns_and_allowances, Expenses []string
 	auto_complete_entries [][]account_method_value_price
 }
 
@@ -78,8 +73,7 @@ type journal_tag struct {
 }
 
 type statement struct {
-	directory_no []uint
-	account      string
+	account string
 	value, price, quantity, percent, average,
 	base_value, base_price, base_quantity, base_percent, average_base,
 	changes_since_base_period, current_period_in_relation_to_base_period float64
@@ -99,12 +93,16 @@ type financial_analysis_statement struct {
 	formula, purpose_or_use   string
 }
 
+type value_quantity struct {
+	value, quantity float64
+}
+
 var (
 	fifo, lifo, wma, service, inventory, cash_and_cash_equivalent, short_term_investments, receivables, current_assets, assets_normal, allowance_for_Doubtful_Accounts, assets_contra, current_liabilities, liabilities_normal,
-	liabilities_contra, equity_normal, equity_contra, withdrawals, sales, revenues, sales_returns_and_allowances, expenses, discounts, temporary_debit_accounts, temporary_accounts, debit_accounts, credit_accounts []string
+	liabilities_contra, equity_normal, equity_contra, withdrawals, sales, revenues, sales_returns_and_allowances, expenses, discounts, temporary_debit_accounts, temporary_accounts, debit_accounts, credit_accounts,
+	retained_earnings_and_income_summary []string
 	invoice_discounts_tax_list [][3]float64
 	db                         *sql.DB
-	all_directory_account      []directory_account
 	standard_days              = [7]string{"Saturday", "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday"}
 	adjusting_methods          = [4]string{"linear", "exponential", "logarithmic", "expire"}
 	depreciation_methods       = [3]string{"linear", "exponential", "logarithmic"}
@@ -121,28 +119,29 @@ func (s Financial_accounting) initialize() {
 	db.Exec("create table if not exists journal (date text,entry_number integer,account text,value real,price real,quantity real,barcode text,entry_expair text,description text,name text,employee_name text,entry_date text,reverse bool)")
 	db.Exec("create table if not exists inventory (date text,entry_number integer,account text,price real,quantity real,quantity_remaining real,adjusted_cost real,barcode text,entry_expair text,name text,employee_name text,entry_date text)")
 
-	fifo = accounts_name(s.Fifo)
-	lifo = accounts_name(s.Lifo)
-	wma = accounts_name(s.Wma)
+	fifo = s.Fifo
+	lifo = s.Lifo
+	wma = s.Wma
 	inventory = concat(fifo, lifo, wma).([]string)
-	cash_and_cash_equivalent = accounts_name(s.Cash_and_cash_equivalent)
-	short_term_investments = accounts_name(s.Short_term_investments)
-	receivables = accounts_name(s.Receivables)
-	current_assets = concat(accounts_name(s.Current_assets), inventory, cash_and_cash_equivalent, short_term_investments, receivables).([]string)
-	assets_normal = concat(accounts_name(s.Assets_normal), current_assets).([]string)
-	allowance_for_Doubtful_Accounts = accounts_name(s.Allowance_for_Doubtful_Accounts)
-	assets_contra = concat(accounts_name(s.Assets_contra), allowance_for_Doubtful_Accounts).([]string)
-	current_liabilities = accounts_name(s.Current_liabilities)
-	liabilities_normal = concat(accounts_name(s.Liabilities_normal), current_liabilities).([]string)
-	liabilities_contra = accounts_name(s.Liabilities_contra)
-	equity_normal = concat(accounts_name(s.Equity_normal), accounts_name(s.retained_earnings[:])).([]string)
-	equity_contra = accounts_name(s.Equity_contra)
-	withdrawals = accounts_name(s.Withdrawals)
-	sales = accounts_name(s.Sales)
-	revenues = concat(accounts_name(s.Revenues), sales, service).([]string)
-	discounts = accounts_name(s.Discounts)
-	sales_returns_and_allowances = accounts_name(s.Sales_returns_and_allowances)
-	expenses = concat(accounts_name(s.Expenses), sales_returns_and_allowances, discounts).([]string)
+	cash_and_cash_equivalent = s.Cash_and_cash_equivalent
+	short_term_investments = s.Short_term_investments
+	receivables = s.Receivables
+	current_assets = concat(s.Current_assets, inventory, cash_and_cash_equivalent, short_term_investments, receivables).([]string)
+	assets_normal = concat(s.Assets_normal, current_assets).([]string)
+	allowance_for_Doubtful_Accounts = s.Allowance_for_Doubtful_Accounts
+	assets_contra = concat(s.Assets_contra, allowance_for_Doubtful_Accounts).([]string)
+	current_liabilities = s.Current_liabilities
+	liabilities_normal = concat(s.Liabilities_normal, current_liabilities).([]string)
+	liabilities_contra = s.Liabilities_contra
+	retained_earnings_and_income_summary = s.retained_earnings_and_income_summary[:]
+	equity_normal = concat(s.Equity_normal, retained_earnings_and_income_summary).([]string)
+	equity_contra = s.Equity_contra
+	withdrawals = s.Withdrawals
+	sales = s.Sales
+	revenues = concat(s.Revenues, sales, service).([]string)
+	discounts = s.Discounts
+	sales_returns_and_allowances = s.Sales_returns_and_allowances
+	expenses = concat(s.Expenses, sales_returns_and_allowances, discounts).([]string)
 	temporary_debit_accounts = concat(withdrawals, expenses).([]string)
 	temporary_accounts = concat(temporary_debit_accounts, revenues).([]string)
 	debit_accounts = concat(assets_normal, liabilities_contra, equity_contra, temporary_debit_accounts).([]string)
@@ -167,30 +166,25 @@ func (s Financial_accounting) initialize() {
 	db.Exec("delete from inventory where entry_expair<? and entry_expair!='0001-01-01 00:00:00 +0000 UTC'", Now.String())
 	db.Exec("delete from inventory where quantity=0")
 
-	check_accounts("account", "inventory", " is not on fifo lifo wma parameters accounts lists", inventory)
-	check_accounts("account", "journal", " is not on parameters accounts lists", all_accounts)
-
-	all_directory_account = concat(s.retained_earnings[:], s.Assets_normal, s.Cash_and_cash_equivalent, s.Fifo, s.Lifo, s.Wma, s.Assets_contra, s.Liabilities_normal, s.Liabilities_contra,
-		s.Equity_normal, s.Equity_contra, s.Withdrawals, s.Sales, s.Revenues, s.Discounts, s.Sales_returns_and_allowances, s.Expenses).([]directory_account)
-	all_directorys := concat(accounts_directory(all_directory_account)).([][]uint)
-	check_if_duplicates_directory(all_directorys)
-	check_if_duplicates(all_accounts)
-
-	for _, directory := range all_directorys {
-		l := len(directory)
-		if l != 1 {
-			ok := false
-			for _, d := range all_directorys {
-				if reflect.DeepEqual(d, directory[:l-1]) {
-					ok = true
-					break
-				}
-			}
-			if !ok {
-				log.Panic("this directory ", directory, " don't have parent directory like this ", directory[:l-1])
-			}
+	var journal [][]Account_value_quantity_barcode
+	var double_entry []Account_value_quantity_barcode
+	previous_entry_number := 1
+	rows, _ := db.Query("select entry_number,account,value from journal")
+	for rows.Next() {
+		var entry_number int
+		var tag Account_value_quantity_barcode
+		rows.Scan(&entry_number, &tag.Account, &tag.value)
+		if previous_entry_number != entry_number {
+			check_debit_equal_credit(double_entry)
+			journal = append(journal, double_entry)
+			double_entry = []Account_value_quantity_barcode{}
 		}
+		double_entry = append(double_entry, tag)
+		previous_entry_number = entry_number
 	}
+
+	check_accounts("account", "inventory", " is not on fifo lifo wma parameters accounts lists", inventory)
+	check_if_duplicates(all_accounts)
 }
 
 func (s Financial_accounting) journal_entry(array_of_entry []Account_value_quantity_barcode, auto_completion bool, date time.Time, entry_expair time.Time, adjusting_method string,
@@ -295,7 +289,6 @@ func (s Financial_accounting) journal_entry(array_of_entry []Account_value_quant
 	}
 
 	array_of_entry = remove_zero_values(array_of_entry)
-	var zero float64
 	var price_slice []float64
 	for index, entry := range array_of_entry {
 		if !is_in(entry.Account, equity_normal) {
@@ -309,17 +302,9 @@ func (s Financial_accounting) journal_entry(array_of_entry []Account_value_quant
 		if price_slice[index] < 0 {
 			log.Panic("the ", entry.value, " and ", entry.quantity, " for ", entry, " should be positive both or negative both")
 		}
-		if is_in(entry.Account, debit_accounts) {
-			zero += entry.value
-		} else if is_in(entry.Account, credit_accounts) {
-			zero -= entry.value
-		} else {
-			log.Panic(entry.Account, " is not on parameters accounts lists")
-		}
 	}
-	if zero != 0 {
-		log.Panic(zero, " not equal 0 if the number>0 it means debit overstated else credit overstated debit-credit should equal zero ", array_of_entry)
-	}
+
+	check_debit_equal_credit(array_of_entry)
 
 	entry_number := entry_number()
 	var array_to_insert []journal_tag
@@ -461,40 +446,24 @@ func (s Financial_accounting) financial_statements(start_base_date, end_base_dat
 	check_dates(start_date, end_date)
 	check_dates(end_base_date, start_date)
 	check_dates(start_base_date, end_base_date)
+	d1 := int(end_date.Sub(start_date).Hours() / 24)
+	d2 := int(end_base_date.Sub(start_base_date).Hours() / 24)
 
-	var net_credit_sales_box, net_credit_sales_box_base, v_net_credit_sales, v_net_credit_sales_base float64
-	var previous_date string
-	var ok, ok_base, is_receivables, is_receivables_base bool
-	var cash, cash_base []journal_tag
-	retained_earnings := &statement{directory_no: s.retained_earnings[0].directory_no, account: s.retained_earnings[0].account_name}
-	journal_map := map[string]*statement{}
-	income_map := map[string]*statement{}
-	cash_map := map[string]*statement{}
+	var journal []journal_tag
 	rows, _ := db.Query("select date,entry_number,account,value,quantity from journal order by date")
 	for rows.Next() {
 		var entry journal_tag
 		rows.Scan(&entry.date, &entry.entry_number, &entry.account, &entry.value, &entry.quantity)
-		date := parse_date(entry.date)
-
-		key_journal := entry.account
-		sum_journal := journal_map[key_journal]
-		if sum_journal == nil {
-			sum_journal = &statement{}
-			journal_map[key_journal] = sum_journal
-		}
-		key_income := entry.account
-		sum_income := income_map[key_income]
-		if sum_income == nil {
-			sum_income = &statement{}
-			income_map[key_income] = sum_income
-		}
-		prepare_statment_maps(sum_journal, sum_income, retained_earnings, cash_map, previous_date, 0, entry, date, start_date, end_date, &is_receivables, &ok, &net_credit_sales_box, &v_net_credit_sales, &cash)
-		prepare_statment_maps(sum_journal, sum_income, retained_earnings, cash_map, previous_date, 1, entry, date, start_base_date, end_base_date, &is_receivables_base, &ok_base, &net_credit_sales_box_base, &v_net_credit_sales_base, &cash_base)
-		previous_date = entry.date
+		journal = append(journal, entry)
 	}
 
-	c, cash_increase := prepare_analysis(journal_map, income_map, cash_map, 0, v_net_credit_sales)
-	b, cash_increase_base := prepare_analysis(journal_map, income_map, cash_map, 1, v_net_credit_sales_base)
+	journal_map1, income_map1, cash_map1, v_net_credit_sales1 := prepare_statment_map(journal, start_date, end_date)
+	journal_map2, income_map2, cash_map2, _ := prepare_statment_map(journal, start_date.AddDate(0, 0, -d1), end_date.AddDate(0, 0, -d1))
+	journal_map3, income_map3, cash_map3, v_net_credit_sales3 := prepare_statment_map(journal, start_base_date, end_base_date)
+	journal_map4, income_map4, cash_map4, _ := prepare_statment_map(journal, start_base_date.AddDate(0, 0, -d2), end_base_date.AddDate(0, 0, -d2))
+
+	c, cash_increase := prepare_analysis(journal_map1, income_map1, cash_map1, v_net_credit_sales1)
+	b, cash_increase_base := prepare_analysis(journal_map3, income_map3, cash_map3, v_net_credit_sales3)
 	analysis := []financial_analysis_statement{
 		{"current_ratio", c.current_ratio(), b.current_ratio(), "current_assets / current_liabilities", "Measures short-term debt-paying ability"},
 		{"acid_test", c.acid_test(), b.acid_test(), "(cash + short_term_investments + net_receivables) / current_liabilities", "Measures immediate short term liquidity"},
@@ -510,9 +479,16 @@ func (s Financial_accounting) financial_statements(start_base_date, end_base_dat
 		{"debt_to_total_assets_ratio", c.debt_to_total_assets_ratio(), b.debt_to_total_assets_ratio(), "total_debt / total_assets", "Measures the percentage of total assets provided by creditors"},
 		{"times_interest_earned", c.times_interest_earned(), b.times_interest_earned(), "income_before_income_taxes_and_interest_expense / interest_expense", "Measures ability to meet interest payments as they come due"},
 	}
-	balance_sheet := append(prepare_statement(journal_map, c.total_assets, b.total_assets), *retained_earnings)
-	income_statements := prepare_statement(income_map, c.net_sales, b.net_sales)
-	cash_flow := prepare_statement(cash_map, cash_increase, cash_increase_base)
+	balance_sheet := prepare_statement(journal_map1, journal_map2, journal_map3, journal_map4, c.total_assets, b.total_assets)
+	income_statements := prepare_statement(income_map1, income_map2, income_map3, income_map4, c.net_sales, b.net_sales)
+	cash_flow := prepare_statement(cash_map1, cash_map2, cash_map3, cash_map4, cash_increase, cash_increase_base)
+
+	if remove_empties {
+		balance_sheet = remove_empties_lines(balance_sheet)
+		income_statements = remove_empties_lines(income_statements)
+		cash_flow = remove_empties_lines(cash_flow)
+
+	}
 	return balance_sheet, income_statements, cash_flow, analysis
 }
 
@@ -733,128 +709,158 @@ func entry_number() int {
 	return tag + 1
 }
 
-func prepare_statment_maps(sum_journal, sum_income, retained_earnings *statement, cash_map map[string]*statement, previous_date string, f int,
-	entry journal_tag, date, start_date, end_date time.Time, is_receivables, ok *bool, net_credit_sales_box, v_net_credit_sales *float64, cash *[]journal_tag) {
-	journal_value, journal_quantity := field(sum_journal, f)
-	income_value, income_quantity := field(sum_income, f)
-	retained_earnings_value, _ := field(retained_earnings, f)
-
-	if previous_date != entry.date {
-		if *ok {
-			for _, entry := range *cash {
-				key_cash := entry.account
-				sum_cash := cash_map[key_cash]
-				if sum_cash == nil {
-					sum_cash = &statement{}
-					cash_map[key_cash] = sum_cash
+func prepare_statment_map(journal []journal_tag, start_date, end_date time.Time) (map[string]*value_quantity, map[string]*value_quantity, map[string]*value_quantity, float64) {
+	var cash []journal_tag
+	var ok, is_receivables bool
+	var previous_date string
+	var v_net_credit_sales, net_credit_sales_box float64
+	journal_map := map[string]*value_quantity{retained_earnings_and_income_summary[0]: {0, 0}, retained_earnings_and_income_summary[1]: {0, 0}}
+	income_map := map[string]*value_quantity{}
+	cash_map := map[string]*value_quantity{}
+	for _, entry := range journal {
+		key_journal := entry.account
+		sum_journal := journal_map[key_journal]
+		if sum_journal == nil {
+			sum_journal = &value_quantity{}
+			journal_map[key_journal] = sum_journal
+		}
+		key_income := entry.account
+		sum_income := income_map[key_income]
+		if sum_income == nil {
+			sum_income = &value_quantity{}
+			income_map[key_income] = sum_income
+		}
+		date := parse_date(entry.date)
+		if previous_date != entry.date {
+			if ok {
+				for _, entry := range cash {
+					key_cash := entry.account
+					sum_cash := cash_map[key_cash]
+					if sum_cash == nil {
+						sum_cash = &value_quantity{}
+						cash_map[key_cash] = sum_cash
+					}
+					if is_in(entry.account, credit_accounts) {
+						sum_cash.value += entry.value
+						sum_cash.quantity += entry.quantity
+					} else {
+						sum_cash.value -= entry.value
+						sum_cash.quantity -= entry.quantity
+					}
 				}
-				cash_value, cash_quantity := field(sum_cash, f)
-				if is_in(entry.account, credit_accounts) {
-					*cash_value += entry.value
-					*cash_quantity += entry.quantity
-				} else {
-					*cash_value -= entry.value
-					*cash_quantity -= entry.quantity
+			}
+			cash = []journal_tag{}
+			ok = false
+			if is_receivables {
+				v_net_credit_sales += net_credit_sales_box
+			}
+			net_credit_sales_box = 0
+			is_receivables = false
+		}
+		previous_date = entry.date
+		if date.Before(start_date) {
+			switch {
+			case is_in(entry.account, revenues):
+				sum_journal := journal_map[retained_earnings_and_income_summary[0]]
+				sum_journal.value += entry.value
+				sum_journal.quantity += entry.quantity
+			case is_in(entry.account, temporary_debit_accounts):
+				sum_journal := journal_map[retained_earnings_and_income_summary[0]]
+				sum_journal.value -= entry.value
+				sum_journal.quantity += entry.quantity
+			default:
+				sum_journal.value += entry.value
+				sum_journal.quantity += entry.quantity
+			}
+		}
+		if date.After(start_date) && date.Before(end_date) {
+			if is_in(entry.account, cash_and_cash_equivalent) {
+				ok = true
+			} else {
+				cash = append(cash, entry)
+			}
+			if is_in(entry.account, receivables) {
+				is_receivables = true
+			}
+			switch {
+			case is_in(entry.account, revenues):
+				sum_journal := journal_map[retained_earnings_and_income_summary[1]]
+				sum_journal.value += entry.value
+				sum_journal.quantity += entry.quantity
+				sum_income.value += entry.value
+				sum_income.quantity += entry.quantity
+				if is_in(entry.account, sales) {
+					net_credit_sales_box += entry.value
 				}
-			}
-		}
-		*cash = []journal_tag{}
-		*ok = false
-		if *is_receivables {
-			*v_net_credit_sales += *net_credit_sales_box
-		}
-		*is_receivables = false
-	}
-	if date.Before(start_date) {
-		if is_in(entry.account, revenues) {
-			*retained_earnings_value += entry.value
-		} else if is_in(entry.account, temporary_debit_accounts) {
-			*retained_earnings_value -= entry.value
-		}
-	}
-	if date.After(start_date) && date.Before(end_date) {
-		if is_in(entry.account, cash_and_cash_equivalent) {
-			*ok = true
-		} else {
-			*cash = append(*cash, entry)
-		}
-		if is_in(entry.account, receivables) {
-			*is_receivables = true
-		}
-		if is_in(entry.account, revenues) {
-			*income_value += entry.value
-			*income_quantity += entry.quantity
-			if is_in(entry.account, sales) {
-				*net_credit_sales_box += entry.value
-			}
-		} else if is_in(entry.account, expenses) {
-			*income_value += entry.value
-			*income_quantity += entry.quantity
-			if is_in(entry.account, sales_returns_and_allowances) {
-				*net_credit_sales_box -= entry.value
+			case is_in(entry.account, expenses):
+				sum_journal := journal_map[retained_earnings_and_income_summary[1]]
+				sum_journal.value += entry.value
+				sum_journal.quantity += entry.quantity
+				sum_income.value += entry.value
+				sum_income.quantity += entry.quantity
+				if is_in(entry.account, sales_returns_and_allowances) {
+					net_credit_sales_box -= entry.value
+				}
+			default:
+				sum_journal.value += entry.value
+				sum_journal.quantity += entry.quantity
 			}
 		}
 	}
-	if date.Before(end_date) {
-		*journal_value += entry.value
-		*journal_quantity += entry.quantity
-	}
+	return journal_map, income_map, cash_map, v_net_credit_sales
 }
 
-func prepare_analysis(journal_map, income_map, cash_map map[string]*statement, f int, v_net_credit_sales float64) (financial_analysis, float64) {
+func prepare_analysis(journal_map, income_map, cash_map map[string]*value_quantity, v_net_credit_sales float64) (financial_analysis, float64) {
 	var v_current_assets, v_current_liabilities, v_cash, v_short_term_investments, v_net_receivables, v_average_net_receivables, v_cost_of_goods_sold, v_average_inventory, v_net_income, v_net_sales,
 		v_average_assets, v_preferred_dividends, v_average_common_stockholders_equity, v_weighted_average_common_shares_outstanding, v_market_price_per_shares_outstanding, v_cash_dividends, v_total_debt, v_total_assets,
 		v_income_before_income_taxes_and_interest_expense, v_interest_expense float64
 	var cash_increase float64
 	for key, v := range journal_map {
-		value, _ := field(v, f)
 		switch {
 		case is_in(key, assets_normal):
-			v_total_assets += *value
+			v_total_assets += v.value
 			if is_in(key, current_assets) {
-				v_current_assets += *value
+				v_current_assets += v.value
 				if is_in(key, short_term_investments) {
-					v_short_term_investments += *value
+					v_short_term_investments += v.value
 				}
 				if is_in(key, receivables) {
-					v_net_receivables += *value
+					v_net_receivables += v.value
 				}
 				if is_in(key, cash_and_cash_equivalent) {
-					v_cash += *value
+					v_cash += v.value
 				}
 			}
 		case is_in(key, assets_contra):
-			v_total_assets -= *value
+			v_total_assets -= v.value
 			if is_in(key, allowance_for_Doubtful_Accounts) {
-				v_net_receivables -= *value
+				v_net_receivables -= v.value
 			}
 		case is_in(key, liabilities_normal):
-			v_total_debt += *value
+			v_total_debt += v.value
 			if is_in(key, current_liabilities) {
-				v_current_liabilities += *value
+				v_current_liabilities += v.value
 			}
 		case is_in(key, liabilities_contra):
-			v_total_debt -= *value
+			v_total_debt -= v.value
 		}
 	}
 	for key, v := range income_map {
-		value, _ := field(v, f)
 		if is_in(key, revenues) {
-			v_net_income += *value
+			v_net_income += v.value
 			if is_in(key, sales) {
-				v_net_sales += *value
+				v_net_sales += v.value
 			}
 		} else {
-			v_net_income -= *value
+			v_net_income -= v.value
 			if is_in(key, sales_returns_and_allowances) || is_in(key, discounts) {
-				v_net_sales -= *value
+				v_net_sales -= v.value
 			}
 		}
 	}
 	for key, v := range cash_map {
-		value, _ := field(v, f)
 		if is_in(key, credit_accounts) {
-			cash_increase += *value
+			cash_increase += v.value
 		}
 	}
 	a := financial_analysis{
@@ -883,29 +889,63 @@ func prepare_analysis(journal_map, income_map, cash_map map[string]*statement, f
 	return a, cash_increase
 }
 
-func prepare_statement(statement_map map[string]*statement, amount, amount_base float64) []statement {
-	statement_sheet := []statement{}
-	for key, v := range statement_map {
-		var directory []uint
-		for _, i := range all_directory_account {
-			if key == i.account_name {
-				directory = i.directory_no
-				break
-			}
+func prepare_statement(statement_map1, statement_map2, statement_map3, statement_map4 map[string]*value_quantity, amount, amount_base float64) []statement {
+	statement_map := map[string]*statement{}
+	for key, v := range statement_map1 {
+		key_statement := key
+		sum_statement := statement_map[key_statement]
+		if sum_statement == nil {
+			sum_statement = &statement{}
+			statement_map[key_statement] = sum_statement
 		}
+		sum_statement.value += v.value
+		sum_statement.quantity += v.quantity
+		sum_statement.average += v.value / 2
+	}
+	for key, v := range statement_map2 {
+		key_statement := key
+		sum_statement := statement_map[key_statement]
+		if sum_statement == nil {
+			sum_statement = &statement{}
+			statement_map[key_statement] = sum_statement
+		}
+		sum_statement.average += v.value / 2
+	}
+	for key, v := range statement_map3 {
+		key_statement := key
+		sum_statement := statement_map[key_statement]
+		if sum_statement == nil {
+			sum_statement = &statement{}
+			statement_map[key_statement] = sum_statement
+		}
+		sum_statement.base_value += v.value
+		sum_statement.base_quantity += v.quantity
+		sum_statement.average_base += v.value / 2
+	}
+	for key, v := range statement_map4 {
+		key_statement := key
+		sum_statement := statement_map[key_statement]
+		if sum_statement == nil {
+			sum_statement = &statement{}
+			statement_map[key_statement] = sum_statement
+		}
+		sum_statement.average_base += v.value / 2
+	}
+
+	var statement_sheet []statement
+	for key, v := range statement_map {
 		statement_sheet = append(statement_sheet, statement{
-			directory_no:              directory,
 			account:                   key,
 			value:                     v.value,
 			price:                     v.value / v.quantity,
 			quantity:                  v.quantity,
 			percent:                   v.value / amount,
-			average:                   0,
+			average:                   v.average,
 			base_value:                v.base_value,
 			base_price:                v.base_value / v.base_quantity,
 			base_quantity:             v.base_quantity,
 			base_percent:              v.base_value / amount_base,
-			average_base:              0,
+			average_base:              v.average_base,
 			changes_since_base_period: v.value - v.base_value,
 			current_period_in_relation_to_base_period: v.value / v.base_value,
 		})
@@ -913,17 +953,27 @@ func prepare_statement(statement_map map[string]*statement, amount, amount_base 
 	return statement_sheet
 }
 
-func field(s *statement, f int) (*float64, *float64) {
-	var v, q *float64
-	switch f {
-	case 0:
-		v = &s.value
-		q = &s.quantity
-	case 1:
-		v = &s.base_value
-		q = &s.base_quantity
+func remove_empties_lines(statement []statement) []statement {
+	var index int
+	for index < len(statement) {
+		if (statement[index].value == 0 || math.IsNaN(statement[index].value)) &&
+			(statement[index].price == 0 || math.IsNaN(statement[index].price)) &&
+			(statement[index].quantity == 0 || math.IsNaN(statement[index].quantity)) &&
+			(statement[index].percent == 0 || math.IsNaN(statement[index].percent)) &&
+			(statement[index].average == 0 || math.IsNaN(statement[index].average)) &&
+			(statement[index].base_value == 0 || math.IsNaN(statement[index].base_value)) &&
+			(statement[index].base_price == 0 || math.IsNaN(statement[index].base_price)) &&
+			(statement[index].base_quantity == 0 || math.IsNaN(statement[index].base_quantity)) &&
+			(statement[index].base_percent == 0 || math.IsNaN(statement[index].base_percent)) &&
+			(statement[index].average_base == 0 || math.IsNaN(statement[index].average_base)) &&
+			(statement[index].changes_since_base_period == 0 || math.IsNaN(statement[index].changes_since_base_period)) &&
+			(statement[index].current_period_in_relation_to_base_period == 0 || math.IsNaN(statement[index].current_period_in_relation_to_base_period)) {
+			statement = append(statement[:index], statement[index+1:]...)
+		} else {
+			index++
+		}
 	}
-	return v, q
+	return statement
 }
 
 func remove_zero_values(array_of_entry []Account_value_quantity_barcode) []Account_value_quantity_barcode {
@@ -967,6 +1017,23 @@ func is_in(element string, elements []string) bool {
 	return false
 }
 
+func check_debit_equal_credit(array_of_entry []Account_value_quantity_barcode) {
+	var zero float64
+	for _, entry := range array_of_entry {
+		if is_in(entry.Account, debit_accounts) {
+			zero += entry.value
+		} else if is_in(entry.Account, credit_accounts) {
+			zero -= entry.value
+		} else {
+			log.Panic(entry.Account, " is not on parameters accounts lists")
+		}
+	}
+	if zero != 0 {
+		log.Panic(zero, " not equal 0 if the number>0 it means debit overstated else credit overstated debit-credit should equal zero ", array_of_entry)
+	}
+
+}
+
 func check_accounts(column, table, panic string, elements []string) {
 	results, err := db.Query("select " + column + " from " + table)
 	error_fatal(err)
@@ -1007,22 +1074,6 @@ func check_if_duplicates(slice_of_elements []string) {
 	}
 }
 
-func check_if_duplicates_directory(slice_of_elements [][]uint) {
-	var set_of_elems, duplicated_element [][]uint
-	for _, element := range slice_of_elements {
-		for _, b := range set_of_elems {
-			if reflect.DeepEqual(b, element) {
-				duplicated_element = append(duplicated_element, element)
-				break
-			}
-		}
-		set_of_elems = append(set_of_elems, element)
-	}
-	if len(duplicated_element) != 0 {
-		log.Panic(duplicated_element, " is duplicated values in the fields of Financial_accounting and that make error. you should remove the duplicate")
-	}
-}
-
 func concat(args ...interface{}) interface{} {
 	n := 0
 	for _, arg := range args {
@@ -1044,22 +1095,6 @@ func discount_tax_calculator(price, discount_tax float64) float64 {
 	return discount_tax
 }
 
-func accounts_name(args []directory_account) []string {
-	accounts_slice := []string{}
-	for _, i := range args {
-		accounts_slice = append(accounts_slice, i.account_name)
-	}
-	return accounts_slice
-}
-
-func accounts_directory(args []directory_account) [][]uint {
-	accounts_slice := [][]uint{}
-	for _, i := range args {
-		accounts_slice = append(accounts_slice, i.directory_no)
-	}
-	return accounts_slice
-}
-
 func transpose(slice [][]journal_tag) [][]journal_tag {
 	xl := len(slice[0])
 	yl := len(slice)
@@ -1077,72 +1112,69 @@ func transpose(slice [][]journal_tag) [][]journal_tag {
 
 func main() {
 	v := Financial_accounting{
-		DriverName:                      "mysql",
-		DataSourceName:                  "hashem:hashem@tcp(localhost)/",
-		Database_name:                   "acc",
-		Invoice_discounts_tax_list:      [][3]float64{{10, -5, 0.01}, {0, 0, 0}},
-		retained_earnings:               [1]directory_account{{[]uint{4, 4}, "retained_earnings"}},
-		Assets_normal:                   []directory_account{{[]uint{1, 1}, "office equipment"}, {[]uint{1}, "Assets_normal"}, {[]uint{1, 3}, "inventory"}},
-		Current_assets:                  []directory_account{},
-		Cash_and_cash_equivalent:        []directory_account{{[]uint{1, 8}, "cash"}},
-		Fifo:                            []directory_account{{[]uint{1, 3, 1}, "book1"}},
-		Lifo:                            []directory_account{{[]uint{1, 3, 2}, "book2"}},
-		Wma:                             []directory_account{{[]uint{1, 3, 3}, "book"}, {[]uint{1, 3, 4}, "book3"}},
-		Short_term_investments:          []directory_account{},
-		Receivables:                     []directory_account{},
-		Assets_contra:                   []directory_account{},
-		Allowance_for_Doubtful_Accounts: []directory_account{},
-		Liabilities_normal:              []directory_account{{[]uint{2, 1}, "tax"}, {[]uint{2}, "Liabilities"}},
-		Current_liabilities:             []directory_account{},
-		Liabilities_contra:              []directory_account{},
-		Equity_normal:                   []directory_account{},
-		Equity_contra:                   []directory_account{},
-		Withdrawals:                     []directory_account{},
-		Sales:                           []directory_account{{[]uint{4, 1}, "revenue of service revenue"}, {[]uint{4, 2}, "revenue of book"}, {[]uint{4, 3, 4}, "service revenue"}},
-		Revenues:                        []directory_account{{[]uint{4, 3}, "service"}, {[]uint{4}, "revenue"}},
-		Discounts:                       []directory_account{{[]uint{3, 1}, "discount of service revenue"}, {[]uint{3, 6}, "discount of book"}, {[]uint{3, 7}, "invoice discount"}},
-		Sales_returns_and_allowances:    []directory_account{},
-		Expenses:                        []directory_account{{[]uint{3, 4}, "tax of service revenue"}, {[]uint{3, 2}, "expair_expenses"}, {[]uint{3, 3}, "cost of book"}, {[]uint{3, 5}, "tax of book"}, {[]uint{3, 8}, "invoice tax"}, {[]uint{3}, "expenses"}},
-		auto_complete_entries: [][]account_method_value_price{
-			{{"service revenue", "quantity_ratio", 0, 10}, {"tax of service revenue", "value", 1, 1}, {"tax", "value", 1, 1}},
-			{{"book", "quantity_ratio", 0, 0}, {"revenue of book", "quantity_ratio", 1, 10}, {"cost of book", "copy_abs", 0, 0}, {"tax of book", "value", 1, 1}, {"tax", "value", 1, 1}, {"discount of book", "value", 1, 1}},
-		},
+		DriverName:                           "mysql",
+		DataSourceName:                       "hashem:hashem@tcp(localhost)/",
+		Database_name:                        "acc",
+		Invoice_discounts_tax_list:           [][3]float64{{10, -5, 0.01}, {0, 0, 0}},
+		retained_earnings_and_income_summary: [2]string{"retained_earnings", "income_summary"},
+		Assets_normal:                        []string{},
+		Current_assets:                       []string{},
+		Cash_and_cash_equivalent:             []string{"cash"},
+		Fifo:                                 []string{},
+		Lifo:                                 []string{},
+		Wma:                                  []string{},
+		Short_term_investments:               []string{},
+		Receivables:                          []string{},
+		Assets_contra:                        []string{},
+		Allowance_for_Doubtful_Accounts:      []string{},
+		Liabilities_normal:                   []string{},
+		Current_liabilities:                  []string{},
+		Liabilities_contra:                   []string{},
+		Equity_normal:                        []string{},
+		Equity_contra:                        []string{},
+		Withdrawals:                          []string{},
+		Sales:                                []string{"service revenue"},
+		Revenues:                             []string{},
+		Discounts:                            []string{},
+		Sales_returns_and_allowances:         []string{},
+		Expenses:                             []string{},
+		auto_complete_entries:                [][]account_method_value_price{{{"service revenue", "quantity_ratio", 0, 10}, {"tax of service revenue", "value", 1, 1}, {"tax", "value", 1, 1}}, {{"book", "quantity_ratio", 0, 0}, {"revenue of book", "quantity_ratio", 1, 10}, {"cost of book", "copy_abs", 0, 0}, {"tax of book", "value", 1, 1}, {"tax", "value", 1, 1}, {"discount of book", "value", 1, 1}}},
 	}
 	v.initialize()
-	entry := v.journal_entry([]Account_value_quantity_barcode{{"book", 10, 10, ""}, {"cash", -10, -10, ""}}, true, time.Date(2020, time.January, 1, 0, 0, 0, 0, time.Local),
-		time.Time{}, "", "", "yasa", "hashem", []day_start_end{})
+	// entry := v.journal_entry([]Account_value_quantity_barcode{{"service revenue", 10, 10, ""}, {"cash", 10, 10, ""}}, true, time.Date(2020, time.January, 1, 0, 0, 0, 0, time.Local),
+	// 	time.Time{}, "", "", "yasa", "hashem", []day_start_end{})
 	// insert_to_database(entry, true, true, true)
 
 	// entry := select_journal(2, time.Time{}, time.Date(2026, time.January, 1, 0, 0, 0, 0, time.Local))
 	// fmt.Println(invoice(entry))
 	// reverse_entry(2, time.Time{}, time.Date(2026, time.January, 1, 0, 0, 0, 0, time.Local), time.Date(2025, time.January, 1, 0, 0, 0, 0, time.Local), "hashem")
-	r := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
-	for _, i := range entry {
-		fmt.Fprintln(r, "\t", i.date, "\t", i.entry_number, "\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.barcode, "\t", i.entry_expair, "\t", i.description, "\t", i.name, "\t", i.employee_name, "\t", i.entry_date, "\t", i.reverse)
+	// r := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
+	// for _, i := range entry {
+	// 	fmt.Fprintln(r, "\t", i.date, "\t", i.entry_number, "\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.barcode, "\t", i.entry_expair, "\t", i.description, "\t", i.name, "\t", i.employee_name, "\t", i.entry_date, "\t", i.reverse)
+	// }
+	// r.Flush()
+
+	balance_sheet, income_statements, cash_flow, analysis := v.financial_statements(
+		time.Date(2019, time.January, 1, 0, 0, 0, 0, time.Local),
+		time.Date(2019, time.January, 1, 0, 0, 0, 0, time.Local),
+		time.Date(2020, time.January, 1, 0, 0, 0, 0, time.Local),
+		time.Date(2023, time.January, 1, 0, 0, 0, 0, time.Local),
+		true)
+
+	w := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
+
+	for _, i := range balance_sheet {
+		fmt.Fprintln(w, "balance_sheet\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.percent, "\t", i.average, "\t", i.base_value, "\t", i.base_price, "\t", i.base_quantity, "\t", i.base_percent, "\t", i.average_base, "\t", i.changes_since_base_period, "\t", i.current_period_in_relation_to_base_period, "\t")
 	}
-	r.Flush()
-
-	// balance_sheet, income_statements, cash_flow, analysis := v.financial_statements(
-	// 	time.Date(2019, time.January, 1, 0, 0, 0, 0, time.Local),
-	// 	time.Date(2019, time.January, 1, 0, 0, 0, 0, time.Local),
-	// 	time.Date(2019, time.January, 1, 0, 0, 0, 0, time.Local),
-	// 	time.Date(2023, time.January, 1, 0, 0, 0, 0, time.Local),
-	// 	true)
-
-	// w := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
-
-	// for _, i := range balance_sheet {
-	// 	fmt.Fprintln(w, "balance_sheet\t", i.directory_no, "\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.percent, "\t", i.average, "\t", i.base_value, "\t", i.base_price, "\t", i.base_quantity, "\t", i.base_percent, "\t", i.average, "\t", i.changes_since_base_period, "\t", i.current_period_in_relation_to_base_period, "\t")
-	// }
-	// for _, i := range income_statements {
-	// 	fmt.Fprintln(w, "income_statements\t", i.directory_no, "\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.percent, "\t", i.average, "\t", i.base_value, "\t", i.base_price, "\t", i.base_quantity, "\t", i.base_percent, "\t", i.average, "\t", i.changes_since_base_period, "\t", i.current_period_in_relation_to_base_period, "\t")
-	// }
-	// for _, i := range cash_flow {
-	// 	fmt.Fprintln(w, "cash_flow\t", i.directory_no, "\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.percent, "\t", i.average, "\t", i.base_value, "\t", i.base_price, "\t", i.base_quantity, "\t", i.base_percent, "\t", i.average, "\t", i.changes_since_base_period, "\t", i.current_period_in_relation_to_base_period, "\t")
-	// }
-	// fmt.Fprintln(w, "######################################################################### analysis ##########################################################################")
-	// for _, i := range analysis {
-	// 	fmt.Fprintln(w, i.ratio, "\t", i.current_value, "\t", i.base_value, "\t", i.formula, "\t", i.purpose_or_use)
-	// }
-	// w.Flush()
+	for _, i := range income_statements {
+		fmt.Fprintln(w, "income_statements\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.percent, "\t", i.average, "\t", i.base_value, "\t", i.base_price, "\t", i.base_quantity, "\t", i.base_percent, "\t", i.average_base, "\t", i.changes_since_base_period, "\t", i.current_period_in_relation_to_base_period, "\t")
+	}
+	for _, i := range cash_flow {
+		fmt.Fprintln(w, "cash_flow\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.percent, "\t", i.average, "\t", i.base_value, "\t", i.base_price, "\t", i.base_quantity, "\t", i.base_percent, "\t", i.average_base, "\t", i.changes_since_base_period, "\t", i.current_period_in_relation_to_base_period, "\t")
+	}
+	fmt.Fprintln(w, "######################################################################### analysis ##########################################################################")
+	for _, i := range analysis {
+		fmt.Fprintln(w, i.ratio, "\t", i.current_value, "\t", i.base_value, "\t", i.formula, "\t", i.purpose_or_use)
+	}
+	w.Flush()
 }
