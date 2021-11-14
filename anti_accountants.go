@@ -442,7 +442,7 @@ func (s Financial_accounting) journal_entry(array_of_entry []Account_value_quant
 	return array_to_insert
 }
 
-func (s Financial_accounting) financial_statements(start_base_date, end_base_date, start_date, end_date time.Time, remove_empties bool) ([]statement, []statement, []statement, []financial_analysis_statement) {
+func (s Financial_accounting) financial_statements(start_base_date, end_base_date, start_date, end_date time.Time) ([]statement, []statement, []statement, []financial_analysis_statement) {
 	check_dates(start_date, end_date)
 	check_dates(end_base_date, start_date)
 	check_dates(start_base_date, end_base_date)
@@ -483,12 +483,10 @@ func (s Financial_accounting) financial_statements(start_base_date, end_base_dat
 	income_statements := prepare_statement(income_map1, income_map2, income_map3, income_map4, c.net_sales, b.net_sales)
 	cash_flow := prepare_statement(cash_map1, cash_map2, cash_map3, cash_map4, cash_increase, cash_increase_base)
 
-	if remove_empties {
-		balance_sheet = remove_empties_lines(balance_sheet)
-		income_statements = remove_empties_lines(income_statements)
-		cash_flow = remove_empties_lines(cash_flow)
+	balance_sheet = remove_empties_lines(balance_sheet)
+	income_statements = remove_empties_lines(income_statements)
+	cash_flow = remove_empties_lines(cash_flow)
 
-	}
 	return balance_sheet, income_statements, cash_flow, analysis
 }
 
@@ -1158,8 +1156,7 @@ func main() {
 		time.Date(2019, time.January, 1, 0, 0, 0, 0, time.Local),
 		time.Date(2019, time.January, 1, 0, 0, 0, 0, time.Local),
 		time.Date(2020, time.January, 1, 0, 0, 0, 0, time.Local),
-		time.Date(2023, time.January, 1, 0, 0, 0, 0, time.Local),
-		true)
+		time.Date(2023, time.January, 1, 0, 0, 0, 0, time.Local))
 
 	w := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
 
