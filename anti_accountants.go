@@ -74,8 +74,8 @@ type journal_tag struct {
 
 type statement struct {
 	account string
-	value, price, quantity, percent, average,
-	base_value, base_price, base_quantity, base_percent, average_base,
+	value, price, quantity, percent, average, turnover,
+	base_value, base_price, base_quantity, base_percent, average_base, base_turnover,
 	changes_since_base_period, current_period_in_relation_to_base_period float64
 }
 
@@ -448,7 +448,6 @@ func (s Financial_accounting) financial_statements(start_base_date, end_base_dat
 	check_dates(start_base_date, end_base_date)
 	d1 := int(end_date.Sub(start_date).Hours() / 24)
 	d2 := int(end_base_date.Sub(start_base_date).Hours() / 24)
-
 	var journal []journal_tag
 	rows, _ := db.Query("select date,entry_number,account,value,quantity from journal order by date")
 	for rows.Next() {
@@ -456,12 +455,10 @@ func (s Financial_accounting) financial_statements(start_base_date, end_base_dat
 		rows.Scan(&entry.date, &entry.entry_number, &entry.account, &entry.value, &entry.quantity)
 		journal = append(journal, entry)
 	}
-
 	journal_map1, income_map1, cash_map1, v_net_credit_sales1 := prepare_statment_map(journal, start_date, end_date)
 	journal_map2, income_map2, cash_map2, _ := prepare_statment_map(journal, start_date.AddDate(0, 0, -d1), end_date.AddDate(0, 0, -d1))
 	journal_map3, income_map3, cash_map3, v_net_credit_sales3 := prepare_statment_map(journal, start_base_date, end_base_date)
 	journal_map4, income_map4, cash_map4, _ := prepare_statment_map(journal, start_base_date.AddDate(0, 0, -d2), end_base_date.AddDate(0, 0, -d2))
-
 	c, cash_increase := prepare_analysis(journal_map1, income_map1, cash_map1, v_net_credit_sales1)
 	b, cash_increase_base := prepare_analysis(journal_map3, income_map3, cash_map3, v_net_credit_sales3)
 	analysis := []financial_analysis_statement{
@@ -474,19 +471,14 @@ func (s Financial_accounting) financial_statements(start_base_date, end_base_dat
 		{"return_on_assets", c.return_on_assets(), b.return_on_assets(), "net_income / average_assets", "Measures overall profitability of assets"},
 		{"return_on_common_stockholders_equity", c.return_on_common_stockholders_equity(), b.return_on_common_stockholders_equity(), "(net_income - preferred_dividends) / average_common_stockholders_equity", "Measures profitability of owners investment"},
 		{"earnings_per_share", c.earnings_per_share(), b.earnings_per_share(), "(net_income - preferred_dividends) / weighted_average_common_shares_outstanding", "Measures net income earned on each share of common stock"},
-		{"price_earnings_ratio", c.price_earnings_ratio(), b.price_earnings_ratio(), "market_price_per_shares_outstanding / ((net_income - preferred_dividends) / weighted_average_common_shares_outstanding)", "Measures the ratio of the market price per share to earnings per share"},
+		{"price_earnings_ratio", c.price_earnings_ratio(), b.price_earnings_ratio(), "market_price_per_shares_outstanding / earnings_per_share", "Measures the ratio of the market price per share to earnings per share"},
 		{"payout_ratio", c.payout_ratio(), b.payout_ratio(), "cash_dividends / net_income", "Measures percentage of earnings distributed in the form of cash dividends"},
 		{"debt_to_total_assets_ratio", c.debt_to_total_assets_ratio(), b.debt_to_total_assets_ratio(), "total_debt / total_assets", "Measures the percentage of total assets provided by creditors"},
 		{"times_interest_earned", c.times_interest_earned(), b.times_interest_earned(), "income_before_income_taxes_and_interest_expense / interest_expense", "Measures ability to meet interest payments as they come due"},
 	}
-	balance_sheet := prepare_statement(journal_map1, journal_map2, journal_map3, journal_map4, c.total_assets, b.total_assets)
-	income_statements := prepare_statement(income_map1, income_map2, income_map3, income_map4, c.net_sales, b.net_sales)
-	cash_flow := prepare_statement(cash_map1, cash_map2, cash_map3, cash_map4, cash_increase, cash_increase_base)
-
-	balance_sheet = remove_empties_lines(balance_sheet)
-	income_statements = remove_empties_lines(income_statements)
-	cash_flow = remove_empties_lines(cash_flow)
-
+	cash_flow := remove_empties_lines(prepare_statement(cash_map1, cash_map2, cash_map3, cash_map4, cash_increase, cash_increase_base))
+	balance_sheet := remove_empties_lines(prepare_statement(journal_map1, journal_map2, journal_map3, journal_map4, c.total_assets, b.total_assets))
+	income_statements := remove_empties_lines(prepare_statement(income_map1, income_map2, income_map3, income_map4, c.net_sales, b.net_sales))
 	return balance_sheet, income_statements, cash_flow, analysis
 }
 
@@ -535,9 +527,9 @@ func (s financial_analysis) earnings_per_share() float64 {
 	return (s.net_income - s.preferred_dividends) / s.weighted_average_common_shares_outstanding
 }
 
-// market_price_per_shares_outstanding / ((net_income - preferred_dividends) / weighted_average_common_shares_outstanding) Measures the ratio of the market price per share to earnings per share
+// market_price_per_shares_outstanding / earnings_per_share Measures the ratio of the market price per share to earnings per share
 func (s financial_analysis) price_earnings_ratio() float64 {
-	return s.market_price_per_shares_outstanding / ((s.net_income - s.preferred_dividends) / s.weighted_average_common_shares_outstanding)
+	return s.market_price_per_shares_outstanding / s.earnings_per_share()
 }
 
 // cash_dividends / net_income Measures percentage of earnings distributed in the form of cash dividends
@@ -1018,18 +1010,18 @@ func is_in(element string, elements []string) bool {
 func check_debit_equal_credit(array_of_entry []Account_value_quantity_barcode) {
 	var zero float64
 	for _, entry := range array_of_entry {
-		if is_in(entry.Account, debit_accounts) {
+		switch {
+		case is_in(entry.Account, debit_accounts):
 			zero += entry.value
-		} else if is_in(entry.Account, credit_accounts) {
+		case is_in(entry.Account, credit_accounts):
 			zero -= entry.value
-		} else {
+		default:
 			log.Panic(entry.Account, " is not on parameters accounts lists")
 		}
 	}
 	if zero != 0 {
 		log.Panic(zero, " not equal 0 if the number>0 it means debit overstated else credit overstated debit-credit should equal zero ", array_of_entry)
 	}
-
 }
 
 func check_accounts(column, table, panic string, elements []string) {
@@ -1155,7 +1147,7 @@ func main() {
 	balance_sheet, income_statements, cash_flow, analysis := v.financial_statements(
 		time.Date(2019, time.January, 1, 0, 0, 0, 0, time.Local),
 		time.Date(2019, time.January, 1, 0, 0, 0, 0, time.Local),
-		time.Date(2020, time.January, 1, 0, 0, 0, 0, time.Local),
+		time.Date(2023, time.January, 1, 0, 0, 0, 0, time.Local),
 		time.Date(2023, time.January, 1, 0, 0, 0, 0, time.Local))
 
 	w := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
