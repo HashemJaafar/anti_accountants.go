@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -438,6 +439,10 @@ func (s Financial_accounting) financial_statements(end_base_date, start_date, en
 	cash_flow := remove_empties_lines(prepare_statement(cash_map1, cash_map2, cash_map3, cash_map4, cash_increase, cash_increase_base))
 	balance_sheet := remove_empties_lines(prepare_statement(journal_map1, journal_map2, journal_map3, journal_map4, c.total_assets, b.total_assets))
 	income_statements := remove_empties_lines(prepare_statement(income_map1, income_map2, income_map3, income_map4, c.net_sales, b.net_sales))
+	sort.Slice(cash_flow[:], func(i, j int) bool { return cash_flow[i].value > cash_flow[j].value })
+	sort.Slice(balance_sheet[:], func(i, j int) bool { return balance_sheet[i].value > balance_sheet[j].value })
+	sort.Slice(income_statements[:], func(i, j int) bool { return income_statements[i].value > income_statements[j].value })
+
 	return balance_sheet, income_statements, cash_flow, analysis
 }
 
@@ -1125,37 +1130,37 @@ func main() {
 			{{"book", "quantity_ratio", -1, 0}, {"revenue of book", "quantity_ratio", 1, 10}, {"cost of book", "copy_abs", 0, 0}, {"tax of book", "value", 1, 1}, {"tax", "value", 1, 1}, {"discount of book", "value", 1, 1}}},
 	}
 	v.initialize()
-	entry := v.journal_entry([]Account_value_quantity_barcode{{"service revenue", 10, 100, ""}, {"cash", 989, 989, ""}}, true, Now,
-		time.Time{}, "", "", "yasa", "hashem", []day_start_end{})
+	// entry := v.journal_entry([]Account_value_quantity_barcode{{"service revenue", 10, 100, ""}, {"cash", 989, 989, ""}}, true, Now,
+	// 	time.Time{}, "", "", "yasa", "hashem", []day_start_end{})
 	// v.insert_to_database(entry, true, true, true)
 
 	// entry := select_journal(0, "cash", time.Time{}, time.Date(2026, time.January, 1, 0, 0, 0, 0, time.Local))
 	// fmt.Println(v.invoice(entry))
 	// reverse_entry(2, time.Time{}, time.Date(2026, time.January, 1, 0, 0, 0, 0, time.Local), time.Date(2025, time.January, 1, 0, 0, 0, 0, time.Local), "hashem")
-	r := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
-	for _, i := range entry {
-		fmt.Fprintln(r, "\t", i.date, "\t", i.entry_number, "\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.barcode, "\t", i.entry_expair, "\t", i.description, "\t", i.name, "\t", i.employee_name, "\t", i.entry_date, "\t", i.reverse)
+	// r := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
+	// for _, i := range entry {
+	// 	fmt.Fprintln(r, "\t", i.date, "\t", i.entry_number, "\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.barcode, "\t", i.entry_expair, "\t", i.description, "\t", i.name, "\t", i.employee_name, "\t", i.entry_date, "\t", i.reverse)
+	// }
+	// r.Flush()
+
+	balance_sheet, income_statements, cash_flow, analysis := v.financial_statements(
+		time.Date(2022, time.January, 1, 0, 0, 0, 0, time.Local),
+		time.Date(2022, time.January, 1, 0, 0, 0, 0, time.Local),
+		time.Date(2022, time.January, 1, 0, 0, 0, 0, time.Local))
+
+	w := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
+	for _, i := range balance_sheet {
+		fmt.Fprintln(w, "balance_sheet\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.percent, "\t", i.average, "\t", i.turnover, "\t", i.value_base, "\t", i.price_base, "\t", i.quantity_base, "\t", i.percent_base, "\t", i.average_base, "\t", i.turnover_base, "\t", i.changes_since_base_period, "\t", i.current_period_in_relation_to_base_period, "\t")
 	}
-	r.Flush()
-
-	// balance_sheet, income_statements, cash_flow, analysis := v.financial_statements(
-	// 	time.Date(2022, time.January, 1, 0, 0, 0, 0, time.Local),
-	// 	time.Date(2022, time.January, 1, 0, 0, 0, 0, time.Local),
-	// 	time.Date(2022, time.January, 1, 0, 0, 0, 0, time.Local))
-
-	// w := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
-	// for _, i := range balance_sheet {
-	// 	fmt.Fprintln(w, "balance_sheet\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.percent, "\t", i.average, "\t", i.turnover, "\t", i.value_base, "\t", i.price_base, "\t", i.quantity_base, "\t", i.percent_base, "\t", i.average_base, "\t", i.turnover_base, "\t", i.changes_since_base_period, "\t", i.current_period_in_relation_to_base_period, "\t")
-	// }
-	// for _, i := range income_statements {
-	// 	fmt.Fprintln(w, "income_statements\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.percent, "\t", i.average, "\t", i.turnover, "\t", i.value_base, "\t", i.price_base, "\t", i.quantity_base, "\t", i.percent_base, "\t", i.average_base, "\t", i.turnover_base, "\t", i.changes_since_base_period, "\t", i.current_period_in_relation_to_base_period, "\t")
-	// }
-	// for _, i := range cash_flow {
-	// 	fmt.Fprintln(w, "cash_flow\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.percent, "\t", i.average, "\t", i.turnover, "\t", i.value_base, "\t", i.price_base, "\t", i.quantity_base, "\t", i.percent_base, "\t", i.average_base, "\t", i.turnover_base, "\t", i.changes_since_base_period, "\t", i.current_period_in_relation_to_base_period, "\t")
-	// }
-	// fmt.Fprintln(w, "######################################################################### analysis ##########################################################################")
-	// for _, i := range analysis {
-	// 	fmt.Fprintln(w, i.ratio, "\t", i.current_value, "\t", i.value_base, "\t", i.formula, "\t", i.purpose_or_use)
-	// }
-	// w.Flush()
+	for _, i := range income_statements {
+		fmt.Fprintln(w, "income_statements\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.percent, "\t", i.average, "\t", i.turnover, "\t", i.value_base, "\t", i.price_base, "\t", i.quantity_base, "\t", i.percent_base, "\t", i.average_base, "\t", i.turnover_base, "\t", i.changes_since_base_period, "\t", i.current_period_in_relation_to_base_period, "\t")
+	}
+	for _, i := range cash_flow {
+		fmt.Fprintln(w, "cash_flow\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.percent, "\t", i.average, "\t", i.turnover, "\t", i.value_base, "\t", i.price_base, "\t", i.quantity_base, "\t", i.percent_base, "\t", i.average_base, "\t", i.turnover_base, "\t", i.changes_since_base_period, "\t", i.current_period_in_relation_to_base_period, "\t")
+	}
+	fmt.Fprintln(w, "######################################################################### analysis ##########################################################################")
+	for _, i := range analysis {
+		fmt.Fprintln(w, i.ratio, "\t", i.current_value, "\t", i.value_base, "\t", i.formula, "\t", i.purpose_or_use)
+	}
+	w.Flush()
 }
