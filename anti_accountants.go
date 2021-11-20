@@ -5,12 +5,10 @@ import (
 	"fmt"
 	"log"
 	"math"
-	"os"
 	"reflect"
 	"sort"
 	"strconv"
 	"strings"
-	"text/tabwriter"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -96,6 +94,10 @@ type financial_analysis_statement struct {
 
 type value_quantity struct {
 	value, quantity float64
+}
+
+type Managerial_Accounting struct {
+	points_activity_level_and_cost_at_the_activity_level [][2]float64
 }
 
 var (
@@ -1096,6 +1098,40 @@ func transpose(slice [][]journal_tag) [][]journal_tag {
 	return result
 }
 
+func mixed_cost(fixed_cost, variable_cost_per_unit_of_activity, level_of_activity float64) float64 {
+	return fixed_cost + variable_cost_per_unit_of_activity*level_of_activity
+}
+
+// return variable_cost
+func (s Managerial_Accounting) high_low() float64 {
+	var y2, y1, x2, x1 float64
+	for _, i := range s.points_activity_level_and_cost_at_the_activity_level {
+		if i[0] >= x2 {
+			x2 = i[0]
+			y2 = i[1]
+		} else if i[0] < x1 {
+			x1 = i[0]
+			y1 = i[1]
+		}
+	}
+	return (y2 - y1) / (x2 - x1)
+}
+
+// return variable_cost and fixed_cost
+func (s Managerial_Accounting) least_squares_regression() (float64, float64) {
+	var sum_x, sum_y, sum_x_quadratic, sum_xy float64
+	for _, i := range s.points_activity_level_and_cost_at_the_activity_level {
+		sum_x += i[0]
+		sum_y += i[1]
+		sum_x_quadratic += math.Pow(i[0], 2)
+		sum_xy += i[0] * i[1]
+	}
+	n := float64(len(s.points_activity_level_and_cost_at_the_activity_level))
+	m := (n*sum_xy - sum_x*sum_y) / ((n * sum_x_quadratic) - math.Pow(sum_x, 2))
+	b := (sum_y - (m * sum_x)) / n
+	return m, b
+}
+
 func main() {
 	v := Financial_accounting{
 		DriverName:                      "mysql",
@@ -1143,24 +1179,30 @@ func main() {
 	// }
 	// r.Flush()
 
-	balance_sheet, income_statements, cash_flow, analysis := v.financial_statements(
-		time.Date(2022, time.January, 1, 0, 0, 0, 0, time.Local),
-		time.Date(2022, time.January, 1, 0, 0, 0, 0, time.Local),
-		time.Date(2022, time.January, 1, 0, 0, 0, 0, time.Local))
+	// balance_sheet, income_statements, cash_flow, analysis := v.financial_statements(
+	// 	time.Date(2022, time.January, 1, 0, 0, 0, 0, time.Local),
+	// 	time.Date(2022, time.January, 1, 0, 0, 0, 0, time.Local),
+	// 	time.Date(2022, time.January, 1, 0, 0, 0, 0, time.Local))
 
-	w := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
-	for _, i := range balance_sheet {
-		fmt.Fprintln(w, "balance_sheet\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.percent, "\t", i.average, "\t", i.turnover, "\t", i.value_base, "\t", i.price_base, "\t", i.quantity_base, "\t", i.percent_base, "\t", i.average_base, "\t", i.turnover_base, "\t", i.changes_since_base_period, "\t", i.current_period_in_relation_to_base_period, "\t")
-	}
-	for _, i := range income_statements {
-		fmt.Fprintln(w, "income_statements\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.percent, "\t", i.average, "\t", i.turnover, "\t", i.value_base, "\t", i.price_base, "\t", i.quantity_base, "\t", i.percent_base, "\t", i.average_base, "\t", i.turnover_base, "\t", i.changes_since_base_period, "\t", i.current_period_in_relation_to_base_period, "\t")
-	}
-	for _, i := range cash_flow {
-		fmt.Fprintln(w, "cash_flow\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.percent, "\t", i.average, "\t", i.turnover, "\t", i.value_base, "\t", i.price_base, "\t", i.quantity_base, "\t", i.percent_base, "\t", i.average_base, "\t", i.turnover_base, "\t", i.changes_since_base_period, "\t", i.current_period_in_relation_to_base_period, "\t")
-	}
-	fmt.Fprintln(w, "######################################################################### analysis ##########################################################################")
-	for _, i := range analysis {
-		fmt.Fprintln(w, i.ratio, "\t", i.current_value, "\t", i.value_base, "\t", i.formula, "\t", i.purpose_or_use)
-	}
-	w.Flush()
+	// w := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
+	// for _, i := range balance_sheet {
+	// 	fmt.Fprintln(w, "balance_sheet\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.percent, "\t", i.average, "\t", i.turnover, "\t", i.value_base, "\t", i.price_base, "\t", i.quantity_base, "\t", i.percent_base, "\t", i.average_base, "\t", i.turnover_base, "\t", i.changes_since_base_period, "\t", i.current_period_in_relation_to_base_period, "\t")
+	// }
+	// for _, i := range income_statements {
+	// 	fmt.Fprintln(w, "income_statements\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.percent, "\t", i.average, "\t", i.turnover, "\t", i.value_base, "\t", i.price_base, "\t", i.quantity_base, "\t", i.percent_base, "\t", i.average_base, "\t", i.turnover_base, "\t", i.changes_since_base_period, "\t", i.current_period_in_relation_to_base_period, "\t")
+	// }
+	// for _, i := range cash_flow {
+	// 	fmt.Fprintln(w, "cash_flow\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.percent, "\t", i.average, "\t", i.turnover, "\t", i.value_base, "\t", i.price_base, "\t", i.quantity_base, "\t", i.percent_base, "\t", i.average_base, "\t", i.turnover_base, "\t", i.changes_since_base_period, "\t", i.current_period_in_relation_to_base_period, "\t")
+	// }
+	// fmt.Fprintln(w, "######################################################################### analysis ##########################################################################")
+	// for _, i := range analysis {
+	// 	fmt.Fprintln(w, i.ratio, "\t", i.current_value, "\t", i.value_base, "\t", i.formula, "\t", i.purpose_or_use)
+	// }
+	// w.Flush()
+
+	point := Managerial_Accounting{
+		points_activity_level_and_cost_at_the_activity_level: [][2]float64{{5600, 7900}, {7100, 8500}, {5000, 7400}, {6500, 8200}, {7300, 9100}, {8000, 9800}, {6200, 7800}}}
+	fmt.Println(point.high_low())
+	fmt.Println(point.least_squares_regression())
+	fmt.Println(mixed_cost(3430.942806076854, 0.7589365504915103, 800))
 }
