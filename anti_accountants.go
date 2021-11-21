@@ -1098,6 +1098,11 @@ func transpose(slice [][]journal_tag) [][]journal_tag {
 	return result
 }
 
+//Cost of goods sold = Beginning merchandise inventory + Purchases − Ending merchandise inventory
+func absolute_total_decrease(beginning_balance, increase, ending_balance float64) float64 {
+	return beginning_balance + increase - ending_balance
+}
+
 func mixed_cost(fixed_cost, variable_cost_per_unit_of_activity, level_of_activity float64) float64 {
 	return fixed_cost + variable_cost_per_unit_of_activity*level_of_activity
 }
@@ -1130,6 +1135,19 @@ func (s Managerial_Accounting) least_squares_regression() (float64, float64) {
 	m := (n*sum_xy - sum_x*sum_y) / ((n * sum_x_quadratic) - math.Pow(sum_x, 2))
 	b := (sum_y - (m * sum_x)) / n
 	return m, b
+}
+
+// the first column is for the quantity and the second and third represent price, if the quantity represent the revenue keep it positive else if it represent the cost make the quantity negative
+func differential_cost_and_revenue(quantity_present_price_proposed_price [][3]float64) (float64, [][4]float64) {
+	var present_income, proposed_income float64
+	var differential_cost_and_revenue [][4]float64
+	for _, i := range quantity_present_price_proposed_price {
+		present_income += i[0] * i[1]
+		proposed_income += i[0] * i[2]
+		differential_cost_and_revenue = append(differential_cost_and_revenue, [4]float64{i[0], i[1], i[2], i[0]*i[2] - i[0]*i[1]})
+	}
+	differential_cost_and_revenue = append(differential_cost_and_revenue, [4]float64{1, present_income, proposed_income, proposed_income - present_income})
+	return proposed_income - present_income, differential_cost_and_revenue
 }
 
 func main() {
@@ -1200,9 +1218,29 @@ func main() {
 	// }
 	// w.Flush()
 
-	point := Managerial_Accounting{
-		points_activity_level_and_cost_at_the_activity_level: [][2]float64{{5600, 7900}, {7100, 8500}, {5000, 7400}, {6500, 8200}, {7300, 9100}, {8000, 9800}, {6200, 7800}}}
-	fmt.Println(point.high_low())
-	fmt.Println(point.least_squares_regression())
-	fmt.Println(mixed_cost(3430.942806076854, 0.7589365504915103, 800))
+	// point := Managerial_Accounting{
+	// 	points_activity_level_and_cost_at_the_activity_level: [][2]float64{
+	// 		{2310, 10113},
+	// 		{2453, 12691},
+	// 		{2641, 10905},
+	// 		{2874, 12949},
+	// 		{3540, 15334},
+	// 		{4861, 21455},
+	// 		{5432, 21270},
+	// 		{5268, 19930},
+	// 		{4628, 21860},
+	// 		{3720, 18383},
+	// 		{2106, 9830},
+	// 		{2495, 11081}}}
+	// fmt.Println(point.high_low())
+	// fmt.Println(point.least_squares_regression())
+	// fmt.Println(mixed_cost(2296.4008257441287, 3.7385227294242687, 100))
+	fmt.Println(differential_cost_and_revenue([][3]float64{
+		{1, 700000, 800000},
+		{-1, 350000, 400000},
+		{-1, 80000, 45000},
+		{-1, 0, 40000},
+		{-1, 50000, 80000},
+		{-1, 60000, 60000},
+	}))
 }
