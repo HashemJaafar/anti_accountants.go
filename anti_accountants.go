@@ -98,6 +98,15 @@ type value_quantity struct {
 
 type Managerial_Accounting struct {
 	points_activity_level_and_cost_at_the_activity_level [][2]float64
+	beginning_balance,
+	increase,
+	ending_balance,
+	decreases_in_account_caused_by_not_sell,
+	actual_mixed_cost,
+	fixed_cost,
+	variable_cost_per_unit,
+	selling_price_per_unit,
+	units float64
 }
 
 var (
@@ -1098,13 +1107,32 @@ func transpose(slice [][]journal_tag) [][]journal_tag {
 	return result
 }
 
-//Cost of goods sold = Beginning merchandise inventory + Purchases − Ending merchandise inventory
-func absolute_total_decrease(beginning_balance, increase, ending_balance float64) float64 {
-	return beginning_balance + increase - ending_balance
+func (s Managerial_Accounting) absolute_total_decrease() float64 {
+	return s.beginning_balance + s.increase - s.ending_balance
 }
 
-func mixed_cost(fixed_cost, variable_cost_per_unit_of_activity, level_of_activity float64) float64 {
-	return fixed_cost + variable_cost_per_unit_of_activity*level_of_activity
+func (s Managerial_Accounting) cost_of_goods_sold() float64 {
+	return s.absolute_total_decrease() + s.decreases_in_account_caused_by_not_sell
+}
+
+func (s Managerial_Accounting) mixed_cost() float64 {
+	return s.fixed_cost + s.variable_cost_per_unit*s.units
+}
+
+func (s Managerial_Accounting) profit() float64 {
+	return s.selling_price_per_unit*s.units - s.mixed_cost()
+}
+
+func (s Managerial_Accounting) break_even_point() float64 {
+	return s.fixed_cost / (s.selling_price_per_unit - s.variable_cost_per_unit)
+}
+
+func (s Managerial_Accounting) mixed_cost_per_unit() float64 {
+	return s.mixed_cost() / s.units
+}
+
+func (s Managerial_Accounting) underapplied_overapplied_mixed_cost() float64 {
+	return s.actual_mixed_cost - s.mixed_cost()
 }
 
 // return variable_cost
@@ -1138,16 +1166,13 @@ func (s Managerial_Accounting) least_squares_regression() (float64, float64) {
 }
 
 // the first column is for the quantity and the second and third represent price, if the quantity represent the revenue keep it positive else if it represent the cost make the quantity negative
-func differential_cost_and_revenue(quantity_present_price_proposed_price [][3]float64) (float64, [][4]float64) {
+func differential_cost_and_revenue(quantity_present_price_proposed_price [][3]float64) float64 {
 	var present_income, proposed_income float64
-	var differential_cost_and_revenue [][4]float64
 	for _, i := range quantity_present_price_proposed_price {
 		present_income += i[0] * i[1]
 		proposed_income += i[0] * i[2]
-		differential_cost_and_revenue = append(differential_cost_and_revenue, [4]float64{i[0], i[1], i[2], i[0]*i[2] - i[0]*i[1]})
 	}
-	differential_cost_and_revenue = append(differential_cost_and_revenue, [4]float64{1, present_income, proposed_income, proposed_income - present_income})
-	return proposed_income - present_income, differential_cost_and_revenue
+	return proposed_income - present_income
 }
 
 func main() {
@@ -1218,29 +1243,33 @@ func main() {
 	// }
 	// w.Flush()
 
-	// point := Managerial_Accounting{
-	// 	points_activity_level_and_cost_at_the_activity_level: [][2]float64{
-	// 		{2310, 10113},
-	// 		{2453, 12691},
-	// 		{2641, 10905},
-	// 		{2874, 12949},
-	// 		{3540, 15334},
-	// 		{4861, 21455},
-	// 		{5432, 21270},
-	// 		{5268, 19930},
-	// 		{4628, 21860},
-	// 		{3720, 18383},
-	// 		{2106, 9830},
-	// 		{2495, 11081}}}
+	point := Managerial_Accounting{
+		points_activity_level_and_cost_at_the_activity_level: [][2]float64{{2310, 10113}, {2453, 12691}, {2641, 10905}, {2874, 12949}, {3540, 15334}, {4861, 21455}, {5432, 21270}, {5268, 19930}, {4628, 21860}, {3720, 18383}, {2106, 9830}, {2495, 11081}},
+		beginning_balance:                       1000,
+		increase:                                500,
+		ending_balance:                          1200,
+		decreases_in_account_caused_by_not_sell: 30,
+		actual_mixed_cost:                       0,
+		fixed_cost:                              400000,
+		variable_cost_per_unit:                  861000 + 1400008,
+		selling_price_per_unit:                  3000000,
+		units:                                   1,
+	}
+	// fmt.Println(differential_cost_and_revenue([][3]float64{
+	// 	{1, 700000, 800000},
+	// 	{-1, 350000, 400000},
+	// 	{-1, 80000, 45000},
+	// 	{-1, 0, 40000},
+	// 	{-1, 50000, 80000},
+	// 	{-1, 60000, 60000},
+	// }))
 	// fmt.Println(point.high_low())
 	// fmt.Println(point.least_squares_regression())
-	// fmt.Println(mixed_cost(2296.4008257441287, 3.7385227294242687, 100))
-	fmt.Println(differential_cost_and_revenue([][3]float64{
-		{1, 700000, 800000},
-		{-1, 350000, 400000},
-		{-1, 80000, 45000},
-		{-1, 0, 40000},
-		{-1, 50000, 80000},
-		{-1, 60000, 60000},
-	}))
+	// fmt.Println(point.absolute_total_decrease())
+	// fmt.Println(point.cost_of_goods_sold())
+	fmt.Println("mixed_cost", point.mixed_cost())
+	fmt.Println("profit", point.profit())
+	fmt.Println("break_even_point", point.break_even_point())
+	fmt.Println("mixed_cost_per_unit", point.mixed_cost_per_unit())
+	fmt.Println("underapplied_overapplied_mixed_cost", point.underapplied_overapplied_mixed_cost())
 }
