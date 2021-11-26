@@ -108,6 +108,7 @@ type cvp_statistics struct {
 	sales,
 	profit,
 	profit_per_unit,
+	contribution_margin_per_unit,
 	contribution_margin,
 	contribution_margin_ratio,
 	break_even_in_unit,
@@ -1151,10 +1152,11 @@ func (s Managerial_Accounting) c_v_p() ([]cvp_statistics, float64, float64, floa
 		mixed_cost_per_unit := mixed_cost / i.units
 		sales := i.selling_price_per_unit * i.units
 		profit := i.selling_price_per_unit*i.units - mixed_cost
-		profit_per_unit := i.selling_price_per_unit - i.variable_cost_per_unit
-		contribution_margin := profit_per_unit * i.units
-		contribution_margin_ratio := profit_per_unit / i.selling_price_per_unit
-		break_even_in_unit := i.fixed_cost / profit_per_unit
+		profit_per_unit := profit / i.units
+		contribution_margin_per_unit := i.selling_price_per_unit - i.variable_cost_per_unit
+		contribution_margin := contribution_margin_per_unit * i.units
+		contribution_margin_ratio := contribution_margin_per_unit / i.selling_price_per_unit
+		break_even_in_unit := i.fixed_cost / contribution_margin_per_unit
 		break_even_in_sales := break_even_in_unit * i.selling_price_per_unit
 		degree_of_operating_leverage := contribution_margin / profit
 		j = append(j, cvp_statistics{
@@ -1167,6 +1169,7 @@ func (s Managerial_Accounting) c_v_p() ([]cvp_statistics, float64, float64, floa
 			sales:                        sales,
 			profit:                       profit,
 			profit_per_unit:              profit_per_unit,
+			contribution_margin_per_unit: contribution_margin_per_unit,
 			contribution_margin:          contribution_margin,
 			contribution_margin_ratio:    contribution_margin_ratio,
 			break_even_in_unit:           break_even_in_unit,
@@ -1178,10 +1181,17 @@ func (s Managerial_Accounting) c_v_p() ([]cvp_statistics, float64, float64, floa
 	}
 	total_contribution_margin_ratio = total_contribution_margin / total_sales
 	total_break_even_in_sales = s.fixed_cost / total_contribution_margin_ratio
-	for index, i := range j {
-		j[index].break_even_in_sales = (i.sales / total_sales) * (total_break_even_in_sales + i.break_even_in_sales)
-		j[index].break_even_in_unit = j[index].break_even_in_sales / i.selling_price_per_unit
-	}
+	// for index, i := range j {
+	// 	percent := (i.sales / total_sales)
+	// 	j[index].break_even_in_sales = percent * (total_break_even_in_sales + i.break_even_in_sales)
+	// 	j[index].break_even_in_unit = j[index].break_even_in_sales / i.selling_price_per_unit
+	// 	j[index].profit = j[index].profit - (percent * s.fixed_cost)
+	// 	j[index].contribution_margin_per_unit = j[index].profit / i.units
+	// 	j[index].fixed_cost += (percent * s.fixed_cost)
+	// 	j[index].mixed_cost += (percent * s.fixed_cost)
+	// 	j[index].mixed_cost_per_unit = j[index].mixed_cost / i.units
+	// 	j[index].degree_of_operating_leverage = j[index].contribution_margin / j[index].profit
+	// }
 	return j, total_sales, total_contribution_margin, total_contribution_margin_ratio, total_break_even_in_sales
 }
 
@@ -1319,7 +1329,7 @@ func main() {
 
 	point := Managerial_Accounting{
 		points_activity_level_and_cost_at_the_activity_level: [][2]float64{{2310, 10113}, {2453, 12691}, {2641, 10905}, {2874, 12949}, {3540, 15334}, {4861, 21455}, {5432, 21270}, {5268, 19930}, {4628, 21860}, {3720, 18383}, {2106, 9830}, {2495, 11081}},
-		cvp:                                     []cvp{{1, 20000, 15000, 500}, {1, 80000, 40000, 0}},
+		cvp:                                     []cvp{{0.6, 20000, 15000, 5400}, {0.6, 80000, 40000, 21600}},
 		fixed_cost:                              27000,
 		beginning_balance:                       200,
 		increase:                                5000,
@@ -1359,9 +1369,9 @@ func main() {
 	fmt.Println("total_contribution_margin_ratio", total_contribution_margin_ratio)
 	fmt.Println("total_break_even_in_sales", total_break_even_in_sales)
 	w := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
-	fmt.Fprintln(w, "units\t", "selling_price_per_unit\t", "variable_cost_per_unit\t", "fixed_cost\t", "mixed_cost\t", "mixed_cost_per_unit\t", "sales\t", "profit\t", "profit_per_unit\t", "contribution_margin\t", "contribution_margin_ratio\t", "break_even_in_unit\t", "break_even_in_sales\t", "degree_of_operating_leverage\t")
+	fmt.Fprintln(w, "units\t", "selling_price_per_unit\t", "variable_cost_per_unit\t", "fixed_cost\t", "mixed_cost\t", "mixed_cost_per_unit\t", "sales\t", "profit\t", "profit_per_unit\t", "contribution_margin_per_unit\t", "contribution_margin\t", "contribution_margin_ratio\t", "break_even_in_unit\t", "break_even_in_sales\t", "degree_of_operating_leverage\t")
 	for _, i := range j {
-		fmt.Fprintln(w, i.units, "\t", i.selling_price_per_unit, "\t", i.variable_cost_per_unit, "\t", i.fixed_cost, "\t", i.mixed_cost, "\t", i.mixed_cost_per_unit, "\t", i.sales, "\t", i.profit, "\t", i.profit_per_unit, "\t", i.contribution_margin, "\t", i.contribution_margin_ratio, "\t", i.break_even_in_unit, "\t", i.break_even_in_sales, "\t", i.degree_of_operating_leverage, "\t")
+		fmt.Fprintln(w, i.units, "\t", i.selling_price_per_unit, "\t", i.variable_cost_per_unit, "\t", i.fixed_cost, "\t", i.mixed_cost, "\t", i.mixed_cost_per_unit, "\t", i.sales, "\t", i.profit, "\t", i.profit_per_unit, "\t", i.contribution_margin_per_unit, "\t", i.contribution_margin, "\t", i.contribution_margin_ratio, "\t", i.break_even_in_unit, "\t", i.break_even_in_sales, "\t", i.degree_of_operating_leverage, "\t")
 	}
 	w.Flush()
 }
