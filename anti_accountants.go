@@ -210,7 +210,7 @@ func (s Financial_accounting) initialize() {
 	check_if_duplicates(all_accounts)
 }
 
-func (s Financial_accounting) journal_entry(array_of_entry []Account_value_quantity_barcode, auto_completion bool, date time.Time, entry_expair time.Time, adjusting_method string,
+func (s Financial_accounting) journal_entry(array_of_entry []Account_value_quantity_barcode, insert, auto_completion bool, date time.Time, entry_expair time.Time, adjusting_method string,
 	description string, name string, employee_name string, array_day_start_end []day_start_end) []journal_tag {
 
 	if entry_expair.IsZero() == is_in(adjusting_method, adjusting_methods[:]) {
@@ -439,6 +439,7 @@ func (s Financial_accounting) journal_entry(array_of_entry []Account_value_quant
 			array_to_insert = append(array_to_insert, element...)
 		}
 	}
+	s.insert_to_database(array_to_insert, insert, insert, insert)
 	return array_to_insert
 }
 
@@ -980,15 +981,29 @@ func is_in(element string, elements []string) bool {
 
 func check_debit_equal_credit(array_of_entry []Account_value_quantity_barcode) {
 	var zero float64
+	var debit_number, credit_number int
 	for _, entry := range array_of_entry {
 		switch {
 		case is_in(entry.Account, debit_accounts):
 			zero += entry.value
+			if entry.value >= 0 {
+				debit_number++
+			} else {
+				credit_number++
+			}
 		case is_in(entry.Account, credit_accounts):
 			zero -= entry.value
+			if entry.value <= 0 {
+				debit_number++
+			} else {
+				credit_number++
+			}
 		default:
 			log.Panic(entry.Account, " is not on parameters accounts lists")
 		}
+	}
+	if (debit_number != 1) && (credit_number != 1) {
+		// log.Panic("should be one credit or one debit in the entry")
 	}
 	if zero != 0 {
 		log.Panic(zero, " not equal 0 if the number>0 it means debit overstated else credit overstated debit-credit should equal zero ", array_of_entry)
@@ -1181,17 +1196,17 @@ func (s Managerial_Accounting) c_v_p() ([]cvp_statistics, float64, float64, floa
 	}
 	total_contribution_margin_ratio = total_contribution_margin / total_sales
 	total_break_even_in_sales = s.fixed_cost / total_contribution_margin_ratio
-	// for index, i := range j {
-	// 	percent := (i.sales / total_sales)
-	// 	j[index].break_even_in_sales = percent * (total_break_even_in_sales + i.break_even_in_sales)
-	// 	j[index].break_even_in_unit = j[index].break_even_in_sales / i.selling_price_per_unit
-	// 	j[index].profit = j[index].profit - (percent * s.fixed_cost)
-	// 	j[index].contribution_margin_per_unit = j[index].profit / i.units
-	// 	j[index].fixed_cost += (percent * s.fixed_cost)
-	// 	j[index].mixed_cost += (percent * s.fixed_cost)
-	// 	j[index].mixed_cost_per_unit = j[index].mixed_cost / i.units
-	// 	j[index].degree_of_operating_leverage = j[index].contribution_margin / j[index].profit
-	// }
+	for index, i := range j {
+		percent := (i.sales / total_sales)
+		j[index].break_even_in_sales = percent * (total_break_even_in_sales + i.break_even_in_sales)
+		j[index].break_even_in_unit = j[index].break_even_in_sales / i.selling_price_per_unit
+		j[index].profit = j[index].profit - (percent * s.fixed_cost)
+		j[index].contribution_margin_per_unit = j[index].profit / i.units
+		j[index].fixed_cost += (percent * s.fixed_cost)
+		j[index].mixed_cost += (percent * s.fixed_cost)
+		j[index].mixed_cost_per_unit = j[index].mixed_cost / i.units
+		j[index].degree_of_operating_leverage = j[index].contribution_margin / j[index].profit
+	}
 	return j, total_sales, total_contribution_margin, total_contribution_margin_ratio, total_break_even_in_sales
 }
 
@@ -1249,6 +1264,10 @@ func (s Managerial_Accounting) least_squares_regression() (float64, float64) {
 	return m, b
 }
 
+func target_sales(target_profit, fixed_cost, contribution_margin_ratio float64) float64 {
+	return (target_profit + fixed_cost) / contribution_margin_ratio
+}
+
 // the first column is for the quantity and the second and third represent price, if the quantity represent the revenue keep it positive else if it represent the cost make the quantity negative
 func differential_cost_and_revenue(quantity_present_price_proposed_price [][3]float64) float64 {
 	var present_income, proposed_income float64
@@ -1260,42 +1279,41 @@ func differential_cost_and_revenue(quantity_present_price_proposed_price [][3]fl
 }
 
 func main() {
-	_ = Financial_accounting{
-		DriverName:                      "mysql",
-		DataSourceName:                  "hashem:hashem@tcp(localhost)/",
-		Database_name:                   "acc",
-		Invoice_discounts_list:          [][2]float64{{5, -10}},
-		retained_earnings:               "retained_earnings",
-		income_summary:                  "income_summary",
-		invoice_discount:                "invoice_discount",
-		Assets_normal:                   []string{},
-		Current_assets:                  []string{},
-		Cash_and_cash_equivalent:        []string{"cash"},
-		Fifo:                            []string{"book"},
-		Lifo:                            []string{},
-		Wma:                             []string{},
-		Short_term_investments:          []string{},
-		Receivables:                     []string{},
-		Assets_contra:                   []string{},
-		Allowance_for_Doubtful_Accounts: []string{},
-		Liabilities_normal:              []string{},
-		Current_liabilities:             []string{"tax"},
-		Liabilities_contra:              []string{},
-		Equity_normal:                   []string{},
-		Equity_contra:                   []string{},
-		Withdrawals:                     []string{},
-		Sales:                           []string{"service revenue", "revenue of book"},
-		Revenues:                        []string{},
-		Discounts:                       []string{"discount of book", "invoice_discount", "service_discount"},
-		Sales_returns_and_allowances:    []string{},
-		Expenses:                        []string{"cost of book", "tax of book", "tax of service revenue", "invoice_tax"},
-		auto_complete_entries: [][]account_method_value_price{{{"service revenue", "quantity_ratio", 0, 10}, {"tax of service revenue", "value", 1, 1}, {"tax", "value", 1, 1}, {"service_discount", "value", 1, 1}},
-			{{"book", "quantity_ratio", -1, 0}, {"revenue of book", "quantity_ratio", 1, 10}, {"cost of book", "copy_abs", 0, 0}, {"tax of book", "value", 1, 1}, {"tax", "value", 1, 1}, {"discount of book", "value", 1, 1}}},
-	}
+	// v := Financial_accounting{
+	// 	DriverName:                      "mysql",
+	// 	DataSourceName:                  "hashem:hashem@tcp(localhost)/",
+	// 	Database_name:                   "acc",
+	// 	Invoice_discounts_list:          [][2]float64{{5, -10}},
+	// 	retained_earnings:               "retained_earnings",
+	// 	income_summary:                  "income_summary",
+	// 	invoice_discount:                "invoice_discount",
+	// 	Assets_normal:                   []string{},
+	// 	Current_assets:                  []string{},
+	// 	Cash_and_cash_equivalent:        []string{"cash"},
+	// 	Fifo:                            []string{"book"},
+	// 	Lifo:                            []string{},
+	// 	Wma:                             []string{},
+	// 	Short_term_investments:          []string{},
+	// 	Receivables:                     []string{},
+	// 	Assets_contra:                   []string{},
+	// 	Allowance_for_Doubtful_Accounts: []string{},
+	// 	Liabilities_normal:              []string{},
+	// 	Current_liabilities:             []string{"tax"},
+	// 	Liabilities_contra:              []string{},
+	// 	Equity_normal:                   []string{},
+	// 	Equity_contra:                   []string{},
+	// 	Withdrawals:                     []string{},
+	// 	Sales:                           []string{"service revenue", "revenue of book"},
+	// 	Revenues:                        []string{},
+	// 	Discounts:                       []string{"discount of book", "invoice_discount", "service_discount"},
+	// 	Sales_returns_and_allowances:    []string{},
+	// 	Expenses:                        []string{"cost of book", "tax of book", "tax of service revenue", "invoice_tax"},
+	// 	auto_complete_entries: [][]account_method_value_price{{{"service revenue", "quantity_ratio", 0, 10}, {"tax of service revenue", "value", 1, 1}, {"tax", "value", 1, 1}, {"service_discount", "value", 1, 1}},
+	// 		{{"book", "quantity_ratio", -1, 0}, {"revenue of book", "quantity_ratio", 1, 10}, {"cost of book", "copy_abs", 0, 0}, {"tax of book", "value", 1, 1}, {"tax", "value", 1, 1}, {"discount of book", "value", 1, 1}}},
+	// }
 	// v.initialize()
-	// entry := v.journal_entry([]Account_value_quantity_barcode{{"service revenue", 10, 100, ""}, {"cash", 989, 989, ""}}, true, Now,
+	// v.journal_entry([]Account_value_quantity_barcode{{"service revenue", 10, 100, ""}, {"cash", 989, 989, ""}}, false, true, Now,
 	// 	time.Time{}, "", "", "yasa", "hashem", []day_start_end{})
-	// v.insert_to_database(entry, true, true, true)
 
 	// entry := select_journal(0, "cash", time.Time{}, time.Date(2026, time.January, 1, 0, 0, 0, 0, time.Local))
 	// fmt.Println(v.invoice(entry))
@@ -1329,7 +1347,7 @@ func main() {
 
 	point := Managerial_Accounting{
 		points_activity_level_and_cost_at_the_activity_level: [][2]float64{{2310, 10113}, {2453, 12691}, {2641, 10905}, {2874, 12949}, {3540, 15334}, {4861, 21455}, {5432, 21270}, {5268, 19930}, {4628, 21860}, {3720, 18383}, {2106, 9830}, {2495, 11081}},
-		cvp:                                     []cvp{{0.6, 20000, 15000, 5400}, {0.6, 80000, 40000, 21600}},
+		cvp:                                     []cvp{{0.6, 20000, 15000, 0}, {0.6, 80000, 40000, 0}},
 		fixed_cost:                              27000,
 		beginning_balance:                       200,
 		increase:                                5000,
@@ -1344,30 +1362,7 @@ func main() {
 		cost_of_beginning_work_in_process_inventory:                   0,
 		cost_added_during_the_period:                                  368600,
 	}
-	// fmt.Println(differential_cost_and_revenue([][3]float64{
-	// 	{1, 700000, 800000},
-	// 	{-1, 350000, 400000},
-	// 	{-1, 80000, 45000},
-	// 	{-1, 0, 40000},
-	// 	{-1, 50000, 80000},
-	// 	{-1, 60000, 60000},
-	// }))
-	fmt.Println("decrease", point.decrease())
-	fmt.Println("cost_of_goods_sold", point.cost_of_goods_sold())
-	fmt.Println("equivalent_units", point.equivalent_units())
-	fmt.Println("equivalent_units_of_production_weighted_average_method", point.equivalent_units_of_production_weighted_average_method())
-	fmt.Println("cost_per_equivalent_unit_weighted_average_method", point.cost_per_equivalent_unit_weighted_average_method())
-	fmt.Println("equivalent_units_of_production_fifo_method", point.equivalent_units_of_production_fifo_method())
-	fmt.Println("equivalent_units_to_complete_beginning_work_in_process_inventory", point.equivalent_units_to_complete_beginning_work_in_process_inventory())
-	fmt.Println("cost_per_equivalent_unit_fifo_method", point.cost_per_equivalent_unit_fifo_method())
-	fmt.Println("high_low", point.high_low())
-	fmt.Println(point.least_squares_regression())
-
-	j, total_sales, total_contribution_margin, total_contribution_margin_ratio, total_break_even_in_sales := point.c_v_p()
-	fmt.Println("total_sales", total_sales)
-	fmt.Println("total_contribution_margin", total_contribution_margin)
-	fmt.Println("total_contribution_margin_ratio", total_contribution_margin_ratio)
-	fmt.Println("total_break_even_in_sales", total_break_even_in_sales)
+	j, _, _, _, _ := point.c_v_p()
 	w := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
 	fmt.Fprintln(w, "units\t", "selling_price_per_unit\t", "variable_cost_per_unit\t", "fixed_cost\t", "mixed_cost\t", "mixed_cost_per_unit\t", "sales\t", "profit\t", "profit_per_unit\t", "contribution_margin_per_unit\t", "contribution_margin\t", "contribution_margin_ratio\t", "break_even_in_unit\t", "break_even_in_sales\t", "degree_of_operating_leverage\t")
 	for _, i := range j {
