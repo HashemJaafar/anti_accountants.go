@@ -7,7 +7,6 @@ import (
 	"math"
 	"os"
 	"reflect"
-	"sort"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -99,6 +98,7 @@ type value_quantity struct {
 }
 
 type cvp_statistics struct {
+	name string
 	units,
 	selling_price_per_unit,
 	variable_cost_per_unit,
@@ -117,12 +117,13 @@ type cvp_statistics struct {
 }
 
 type cvp struct {
+	name                                                              string
 	units, selling_price_per_unit, variable_cost_per_unit, fixed_cost float64
 }
 
 type Managerial_Accounting struct {
 	points_activity_level_and_cost_at_the_activity_level [][2]float64
-	sales_or_mixed_cost                                  string
+	percent_method                                       string
 	cvp                                                  []cvp
 	fixed_cost,
 	beginning_balance,
@@ -444,7 +445,7 @@ func (s Financial_accounting) journal_entry(array_of_entry []Account_value_quant
 	return array_to_insert
 }
 
-func (s Financial_accounting) financial_statements(end_base_date, start_date, end_date time.Time) ([]statement, []statement, []statement, []financial_analysis_statement) {
+func (s Financial_accounting) financial_statements(end_base_date, start_date, end_date time.Time, balance_sheet_order, income_statements_order, cash_flow_order [][]string) ([]statement, []statement, []statement, []financial_analysis_statement) {
 	check_dates(start_date, end_date)
 	check_dates(end_base_date, start_date)
 	d1 := int(end_date.Sub(start_date).Hours() / 24)
@@ -481,9 +482,9 @@ func (s Financial_accounting) financial_statements(end_base_date, start_date, en
 	cash_flow := remove_empties_lines(prepare_statement(cash_map1, cash_map2, cash_map3, cash_map4, cash_increase, cash_increase_base))
 	balance_sheet := remove_empties_lines(prepare_statement(journal_map1, journal_map2, journal_map3, journal_map4, c.total_assets, b.total_assets))
 	income_statements := remove_empties_lines(prepare_statement(income_map1, income_map2, income_map3, income_map4, c.net_sales, b.net_sales))
-	sort.Slice(cash_flow[:], func(i, j int) bool { return cash_flow[i].value > cash_flow[j].value })
-	sort.Slice(balance_sheet[:], func(i, j int) bool { return balance_sheet[i].value > balance_sheet[j].value })
-	sort.Slice(income_statements[:], func(i, j int) bool { return income_statements[i].value > income_statements[j].value })
+	cash_flow = statements_order(cash_flow, cash_flow_order)
+	balance_sheet = statements_order(balance_sheet, balance_sheet_order)
+	income_statements = statements_order(income_statements, income_statements_order)
 	return balance_sheet, income_statements, cash_flow, analysis
 }
 
@@ -791,6 +792,19 @@ func (s Financial_accounting) prepare_analysis(journal_map, income_map, cash_map
 		interest_expense:                                v_interest_expense,
 	}
 	return a, cash_increase
+}
+
+func statements_order(statement_sheet []statement, order [][]string) []statement {
+	m := map[string]*statement{}
+	for _, i := range order {
+		sums := m[i[0]]
+		if sums == nil {
+			sums = &statement{}
+			m[i[0]] = sums
+		}
+		fmt.Println(i[0])
+	}
+	return []statement{}
 }
 
 func select_journal(entry_number uint, account string, start_date, end_date time.Time) []journal_tag {
@@ -1159,7 +1173,7 @@ func (s Managerial_Accounting) cost_of_goods_sold() float64 {
 	return s.decrease() - s.decreases_in_account_caused_by_not_sell
 }
 
-func cost_volume_profit(units, selling_price_per_unit, variable_cost_per_unit, fixed_cost float64) cvp_statistics {
+func cost_volume_profit(name string, units, selling_price_per_unit, variable_cost_per_unit, fixed_cost float64) cvp_statistics {
 	mixed_cost := fixed_cost + variable_cost_per_unit*units
 	mixed_cost_per_unit := mixed_cost / units
 	sales := selling_price_per_unit * units
@@ -1172,6 +1186,7 @@ func cost_volume_profit(units, selling_price_per_unit, variable_cost_per_unit, f
 	break_even_in_sales := break_even_in_unit * selling_price_per_unit
 	degree_of_operating_leverage := contribution_margin / profit
 	return cvp_statistics{
+		name:                         name,
 		units:                        units,
 		selling_price_per_unit:       selling_price_per_unit,
 		variable_cost_per_unit:       variable_cost_per_unit,
@@ -1193,32 +1208,32 @@ func cost_volume_profit(units, selling_price_per_unit, variable_cost_per_unit, f
 func (s Managerial_Accounting) cost_volume_profit_slice() []cvp_statistics {
 	var j cvp_statistics
 	var h []cvp_statistics
-	var total_mixed_cost, total_sales float64
+	var total_mixed_cost, total_sales, total_units, selling_price_per_unit, variable_cost_per_unit, fixed_cost float64
 	for _, i := range s.cvp {
-		j = cost_volume_profit(i.units, i.selling_price_per_unit, i.variable_cost_per_unit, i.fixed_cost)
+		j = cost_volume_profit(i.name, i.units, i.selling_price_per_unit, i.variable_cost_per_unit, i.fixed_cost)
 		h = append(h, j)
 		total_mixed_cost += j.mixed_cost
 		total_sales += j.sales
+		total_units += i.units
+		selling_price_per_unit += i.selling_price_per_unit * i.units
+		variable_cost_per_unit += i.variable_cost_per_unit * i.units
 	}
 	for index, i := range h {
 		var percent float64
-		switch s.sales_or_mixed_cost {
+		switch s.percent_method {
 		case "mixed_cost":
-			percent = (i.mixed_cost / total_mixed_cost)
+			percent = i.mixed_cost / total_mixed_cost
 		case "sales":
-			percent = (i.sales / total_sales)
+			percent = i.sales / total_sales
+		case "units":
+			percent = i.units / total_units
+		case "1":
+			percent = 1
 		}
-		h[index] = cost_volume_profit(i.units, i.selling_price_per_unit, i.variable_cost_per_unit, i.fixed_cost+(percent*s.fixed_cost))
+		h[index] = cost_volume_profit(i.name, i.units, i.selling_price_per_unit, i.variable_cost_per_unit, i.fixed_cost+(percent*s.fixed_cost))
+		fixed_cost += h[index].fixed_cost
 	}
-	var units, selling_price_per_unit, variable_cost_per_unit, fixed_cost float64
-	for _, i := range h {
-		units += i.units
-		selling_price_per_unit += i.selling_price_per_unit * i.units
-		variable_cost_per_unit += i.variable_cost_per_unit * i.units
-		fixed_cost += i.fixed_cost
-	}
-	h = append(h, cost_volume_profit(units, selling_price_per_unit/units, variable_cost_per_unit/units, fixed_cost))
-	return h
+	return append(h, cost_volume_profit("total", total_units, selling_price_per_unit/total_units, variable_cost_per_unit/total_units, fixed_cost))
 }
 
 func (s Managerial_Accounting) equivalent_units() float64 {
@@ -1279,50 +1294,39 @@ func target_sales(target_profit, fixed_cost, contribution_margin_ratio float64) 
 	return (target_profit + fixed_cost) / contribution_margin_ratio
 }
 
-// the first column is for the quantity and the second and third represent price, if the quantity represent the revenue keep it positive else if it represent the cost make the quantity negative
-func differential_cost_and_revenue(quantity_present_price_proposed_price [][3]float64) float64 {
-	var present_income, proposed_income float64
-	for _, i := range quantity_present_price_proposed_price {
-		present_income += i[0] * i[1]
-		proposed_income += i[0] * i[2]
-	}
-	return proposed_income - present_income
-}
-
 func main() {
-	// v := Financial_accounting{
-	// 	DriverName:                      "mysql",
-	// 	DataSourceName:                  "hashem:hashem@tcp(localhost)/",
-	// 	Database_name:                   "acc",
-	// 	Invoice_discounts_list:          [][2]float64{{5, -10}},
-	// 	retained_earnings:               "retained_earnings",
-	// 	income_summary:                  "income_summary",
-	// 	invoice_discount:                "invoice_discount",
-	// 	Assets_normal:                   []string{},
-	// 	Current_assets:                  []string{},
-	// 	Cash_and_cash_equivalent:        []string{"cash"},
-	// 	Fifo:                            []string{"book"},
-	// 	Lifo:                            []string{},
-	// 	Wma:                             []string{},
-	// 	Short_term_investments:          []string{},
-	// 	Receivables:                     []string{},
-	// 	Assets_contra:                   []string{},
-	// 	Allowance_for_Doubtful_Accounts: []string{},
-	// 	Liabilities_normal:              []string{},
-	// 	Current_liabilities:             []string{"tax"},
-	// 	Liabilities_contra:              []string{},
-	// 	Equity_normal:                   []string{},
-	// 	Equity_contra:                   []string{},
-	// 	Withdrawals:                     []string{},
-	// 	Sales:                           []string{"service revenue", "revenue of book"},
-	// 	Revenues:                        []string{},
-	// 	Discounts:                       []string{"discount of book", "invoice_discount", "service_discount"},
-	// 	Sales_returns_and_allowances:    []string{},
-	// 	Expenses:                        []string{"cost of book", "tax of book", "tax of service revenue", "invoice_tax"},
-	// 	auto_complete_entries: [][]account_method_value_price{{{"service revenue", "quantity_ratio", 0, 10}, {"tax of service revenue", "value", 1, 1}, {"tax", "value", 1, 1}, {"service_discount", "value", 1, 1}},
-	// 		{{"book", "quantity_ratio", -1, 0}, {"revenue of book", "quantity_ratio", 1, 10}, {"cost of book", "copy_abs", 0, 0}, {"tax of book", "value", 1, 1}, {"tax", "value", 1, 1}, {"discount of book", "value", 1, 1}}},
-	// }
-	// v.initialize()
+	v := Financial_accounting{
+		DriverName:                      "mysql",
+		DataSourceName:                  "hashem:hashem@tcp(localhost)/",
+		Database_name:                   "acc",
+		Invoice_discounts_list:          [][2]float64{{5, -10}},
+		retained_earnings:               "retained_earnings",
+		income_summary:                  "income_summary",
+		invoice_discount:                "invoice_discount",
+		Assets_normal:                   []string{},
+		Current_assets:                  []string{},
+		Cash_and_cash_equivalent:        []string{"cash"},
+		Fifo:                            []string{"book"},
+		Lifo:                            []string{},
+		Wma:                             []string{},
+		Short_term_investments:          []string{},
+		Receivables:                     []string{},
+		Assets_contra:                   []string{},
+		Allowance_for_Doubtful_Accounts: []string{},
+		Liabilities_normal:              []string{},
+		Current_liabilities:             []string{"tax"},
+		Liabilities_contra:              []string{},
+		Equity_normal:                   []string{},
+		Equity_contra:                   []string{},
+		Withdrawals:                     []string{},
+		Sales:                           []string{"service revenue", "revenue of book"},
+		Revenues:                        []string{},
+		Discounts:                       []string{"discount of book", "invoice_discount", "service_discount"},
+		Sales_returns_and_allowances:    []string{},
+		Expenses:                        []string{"cost of book", "tax of book", "tax of service revenue", "invoice_tax"},
+		auto_complete_entries:           [][]account_method_value_price{{{"service revenue", "quantity_ratio", 0, 10}, {"tax of service revenue", "value", 1, 1}, {"tax", "value", 1, 1}, {"service_discount", "value", 1, 1}}, {{"book", "quantity_ratio", -1, 0}, {"revenue of book", "quantity_ratio", 1, 10}, {"cost of book", "copy_abs", 0, 0}, {"tax of book", "value", 1, 1}, {"tax", "value", 1, 1}, {"discount of book", "value", 1, 1}}},
+	}
+	v.initialize()
 	// v.journal_entry([]Account_value_quantity_barcode{{"service revenue", 10, 100, ""}, {"cash", 989, 989, ""}}, false, true, Now,
 	// 	time.Time{}, "", "", "yasa", "hashem", []day_start_end{})
 
@@ -1335,15 +1339,22 @@ func main() {
 	// }
 	// r.Flush()
 
-	// balance_sheet, income_statements, cash_flow, analysis := v.financial_statements(
-	// 	time.Date(2022, time.January, 1, 0, 0, 0, 0, time.Local),
-	// 	time.Date(2022, time.January, 1, 0, 0, 0, 0, time.Local),
-	// 	time.Date(2022, time.January, 1, 0, 0, 0, 0, time.Local))
+	balance_sheet, _, _, _ := v.financial_statements(
+		time.Date(2022, time.January, 1, 0, 0, 0, 0, time.Local),
+		time.Date(2022, time.January, 1, 0, 0, 0, 0, time.Local),
+		time.Date(2022, time.January, 1, 0, 0, 0, 0, time.Local),
+		[][]string{
+			{"Assets", "cash", "book"},
+			{"Liabilities", "tax"},
+			{"Equity", "retained_earnings", "income_summary"}},
+		[][]string{},
+		[][]string{},
+	)
 
-	// w := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
-	// for _, i := range balance_sheet {
-	// 	fmt.Fprintln(w, "balance_sheet\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.percent, "\t", i.average, "\t", i.turnover, "\t", i.value_base, "\t", i.price_base, "\t", i.quantity_base, "\t", i.percent_base, "\t", i.average_base, "\t", i.turnover_base, "\t", i.changes_since_base_period, "\t", i.current_period_in_relation_to_base_period, "\t")
-	// }
+	w := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
+	for _, i := range balance_sheet {
+		fmt.Fprintln(w, "balance_sheet\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.percent, "\t", i.average, "\t", i.turnover, "\t", i.value_base, "\t", i.price_base, "\t", i.quantity_base, "\t", i.percent_base, "\t", i.average_base, "\t", i.turnover_base, "\t", i.changes_since_base_period, "\t", i.current_period_in_relation_to_base_period, "\t")
+	}
 	// for _, i := range income_statements {
 	// 	fmt.Fprintln(w, "income_statements\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.percent, "\t", i.average, "\t", i.turnover, "\t", i.value_base, "\t", i.price_base, "\t", i.quantity_base, "\t", i.percent_base, "\t", i.average_base, "\t", i.turnover_base, "\t", i.changes_since_base_period, "\t", i.current_period_in_relation_to_base_period, "\t")
 	// }
@@ -1354,31 +1365,31 @@ func main() {
 	// for _, i := range analysis {
 	// 	fmt.Fprintln(w, i.ratio, "\t", i.current_value, "\t", i.value_base, "\t", i.formula, "\t", i.purpose_or_use)
 	// }
-	// w.Flush()
-
-	point := Managerial_Accounting{
-		points_activity_level_and_cost_at_the_activity_level: [][2]float64{{2310, 10113}, {2453, 12691}, {2641, 10905}, {2874, 12949}, {3540, 15334}, {4861, 21455}, {5432, 21270}, {5268, 19930}, {4628, 21860}, {3720, 18383}, {2106, 9830}, {2495, 11081}},
-		sales_or_mixed_cost:                     "sales",
-		cvp:                                     []cvp{{50, 4, 2, 0}, {40, 6, 2.5, 0}},
-		fixed_cost:                              20,
-		beginning_balance:                       200,
-		increase:                                5000,
-		ending_balance:                          400,
-		decreases_in_account_caused_by_not_sell: 30,
-		actual_mixed_cost:                       0,
-		number_of_partially_completed_units:     0,
-		percentage_completion:                   0,
-		units_transferred_to_the_next_department_or_to_finished_goods: 4800,
-		equivalent_units_in_ending_work_in_process_inventory:          160,
-		equivalent_units_in_beginning_work_in_process_inventory:       0,
-		cost_of_beginning_work_in_process_inventory:                   0,
-		cost_added_during_the_period:                                  368600,
-	}
-	j := point.cost_volume_profit_slice()
-	w := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
-	fmt.Fprintln(w, "units\t", "selling_price_per_unit\t", "variable_cost_per_unit\t", "fixed_cost\t", "mixed_cost\t", "mixed_cost_per_unit\t", "sales\t", "profit\t", "profit_per_unit\t", "contribution_margin_per_unit\t", "contribution_margin\t", "contribution_margin_ratio\t", "break_even_in_unit\t", "break_even_in_sales\t", "degree_of_operating_leverage\t")
-	for _, i := range j {
-		fmt.Fprintln(w, i.units, "\t", i.selling_price_per_unit, "\t", i.variable_cost_per_unit, "\t", i.fixed_cost, "\t", i.mixed_cost, "\t", i.mixed_cost_per_unit, "\t", i.sales, "\t", i.profit, "\t", i.profit_per_unit, "\t", i.contribution_margin_per_unit, "\t", i.contribution_margin, "\t", i.contribution_margin_ratio, "\t", i.break_even_in_unit, "\t", i.break_even_in_sales, "\t", i.degree_of_operating_leverage, "\t")
-	}
 	w.Flush()
+
+	// point := Managerial_Accounting{
+	// 	points_activity_level_and_cost_at_the_activity_level: [][2]float64{{2310, 10113}, {2453, 12691}, {2641, 10905}, {2874, 12949}, {3540, 15334}, {4861, 21455}, {5432, 21270}, {5268, 19930}, {4628, 21860}, {3720, 18383}, {2106, 9830}, {2495, 11081}},
+	// 	percent_method:                          "sales",
+	// 	cvp:                                     []cvp{{"book", 1, 20000, 15000, 0}, {"book1", 1, 80000, 40000, 0}},
+	// 	fixed_cost:                              27000,
+	// 	beginning_balance:                       200,
+	// 	increase:                                5000,
+	// 	ending_balance:                          400,
+	// 	decreases_in_account_caused_by_not_sell: 30,
+	// 	actual_mixed_cost:                       0,
+	// 	number_of_partially_completed_units:     0,
+	// 	percentage_completion:                   0,
+	// 	units_transferred_to_the_next_department_or_to_finished_goods: 4800,
+	// 	equivalent_units_in_ending_work_in_process_inventory:          160,
+	// 	equivalent_units_in_beginning_work_in_process_inventory:       0,
+	// 	cost_of_beginning_work_in_process_inventory:                   0,
+	// 	cost_added_during_the_period:                                  368600,
+	// }
+	// j := point.cost_volume_profit_slice()
+	// q := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
+	// fmt.Fprintln(q, "name\t", "units\t", "selling_price_per_unit\t", "variable_cost_per_unit\t", "fixed_cost\t", "mixed_cost\t", "mixed_cost_per_unit\t", "sales\t", "profit\t", "profit_per_unit\t", "contribution_margin_per_unit\t", "contribution_margin\t", "contribution_margin_ratio\t", "break_even_in_unit\t", "break_even_in_sales\t", "degree_of_operating_leverage\t")
+	// for _, i := range j {
+	// 	fmt.Fprintln(q, i.name, "\t", i.units, "\t", i.selling_price_per_unit, "\t", i.variable_cost_per_unit, "\t", i.fixed_cost, "\t", i.mixed_cost, "\t", i.mixed_cost_per_unit, "\t", i.sales, "\t", i.profit, "\t", i.profit_per_unit, "\t", i.contribution_margin_per_unit, "\t", i.contribution_margin, "\t", i.contribution_margin_ratio, "\t", i.break_even_in_unit, "\t", i.break_even_in_sales, "\t", i.degree_of_operating_leverage, "\t")
+	// }
+	// q.Flush()
 }
