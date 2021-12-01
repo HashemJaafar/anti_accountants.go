@@ -47,6 +47,12 @@ type invoice_struct struct {
 	value, price, quantity float64
 }
 
+type account struct {
+	is_credit bool
+	name      string
+	children  []account
+}
+
 type Financial_accounting struct {
 	DriverName, DataSourceName, Database_name           string
 	Invoice_discounts_list                              [][2]float64
@@ -119,13 +125,14 @@ type cvp_statistics struct {
 type cvp struct {
 	name                                                              string
 	units, selling_price_per_unit, variable_cost_per_unit, fixed_cost float64
+	portions                                                          []float64
 }
 
 type Managerial_Accounting struct {
 	points_activity_level_and_cost_at_the_activity_level [][2]float64
 	percent_method                                       string
 	cvp                                                  []cvp
-	fixed_cost,
+	fixed_cost                                           []float64
 	beginning_balance,
 	increase,
 	ending_balance,
@@ -142,7 +149,7 @@ type Managerial_Accounting struct {
 
 var (
 	inventory, current_assets, assets_normal, assets_contra, liabilities_normal, equity_normal, revenues, expenses,
-	temporary_debit_accounts, temporary_accounts, debit_accounts, credit_accounts []string
+	temporary_debit_accounts, temporary_accounts, debit_accounts, credit_accounts, all_accounts []string
 	db                   *sql.DB
 	standard_days        = [7]string{"Saturday", "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday"}
 	adjusting_methods    = [4]string{"linear", "exponential", "logarithmic", "expire"}
@@ -172,7 +179,7 @@ func (s Financial_accounting) initialize() {
 	temporary_accounts = concat(temporary_debit_accounts, revenues).([]string)
 	debit_accounts = concat(assets_normal, s.Liabilities_contra, s.Equity_contra, temporary_debit_accounts).([]string)
 	credit_accounts = concat(assets_contra, liabilities_normal, equity_normal, revenues).([]string)
-	all_accounts := concat(debit_accounts, credit_accounts).([]string)
+	all_accounts = concat(debit_accounts, credit_accounts).([]string)
 
 	entry_number := entry_number()
 	var array_to_insert []journal_tag
@@ -479,12 +486,12 @@ func (s Financial_accounting) financial_statements(end_base_date, start_date, en
 		{"debt_to_total_assets_ratio", c.debt_to_total_assets_ratio(), b.debt_to_total_assets_ratio(), "total_debt / total_assets", "Measures the percentage of total assets provided by creditors"},
 		{"times_interest_earned", c.times_interest_earned(), b.times_interest_earned(), "income_before_income_taxes_and_interest_expense / interest_expense", "Measures ability to meet interest payments as they come due"},
 	}
-	cash_flow := remove_empties_lines(prepare_statement(cash_map1, cash_map2, cash_map3, cash_map4, cash_increase, cash_increase_base))
-	balance_sheet := remove_empties_lines(prepare_statement(journal_map1, journal_map2, journal_map3, journal_map4, c.total_assets, b.total_assets))
-	income_statements := remove_empties_lines(prepare_statement(income_map1, income_map2, income_map3, income_map4, c.net_sales, b.net_sales))
-	cash_flow = statements_order(cash_flow, cash_flow_order)
-	balance_sheet = statements_order(balance_sheet, balance_sheet_order)
-	income_statements = statements_order(income_statements, income_statements_order)
+	cash_flow := prepare_statement(cash_map1, cash_map2, cash_map3, cash_map4, cash_increase, cash_increase_base)
+	balance_sheet := prepare_statement(journal_map1, journal_map2, journal_map3, journal_map4, c.total_assets, b.total_assets)
+	income_statements := prepare_statement(income_map1, income_map2, income_map3, income_map4, c.net_sales, b.net_sales)
+	cash_flow = statements_order(cash_flow, cash_flow_order, cash_increase, cash_increase_base, "cash_flow")
+	balance_sheet = statements_order(balance_sheet, balance_sheet_order, c.total_assets, b.total_assets, "balance_sheet")
+	income_statements = statements_order(income_statements, income_statements_order, c.net_sales, b.net_sales, "income_statements")
 	return balance_sheet, income_statements, cash_flow, analysis
 }
 
@@ -794,17 +801,82 @@ func (s Financial_accounting) prepare_analysis(journal_map, income_map, cash_map
 	return a, cash_increase
 }
 
-func statements_order(statement_sheet []statement, order [][]string) []statement {
-	m := map[string]*statement{}
-	for _, i := range order {
-		sums := m[i[0]]
-		if sums == nil {
-			sums = &statement{}
-			m[i[0]] = sums
+func statements_order(statement_sheet []statement, order [][]string, amount, amount_base float64, statement_name string) []statement {
+	var last_order [][]string
+	var children []string
+	statement_map := map[string]*statement{}
+	for {
+		for indexa, a := range order {
+			for _, b := range a[1:] {
+				for _, c := range order {
+					if c[0] == b {
+						children = append(children, c[1:]...)
+					}
+				}
+			}
+			if len(children) == 0 {
+				children = a[1:]
+			}
+			order[indexa] = concat([]string{a[0]}, children).([]string)
+			children = []string{}
 		}
-		fmt.Println(i[0])
+		if reflect.DeepEqual(last_order, order) {
+			break
+		}
+		last_order = order
 	}
-	return []statement{}
+	var ok bool
+	for _, a := range statement_sheet {
+		for _, b := range order {
+			if is_in(a.account, b) {
+				ok = true
+				break
+			}
+			ok = false
+		}
+		if !ok {
+			fmt.Println("were is", a.account, "in", statement_name)
+		}
+	}
+	for _, a := range order {
+		key_statement := a[0]
+		sum_statement := statement_map[key_statement]
+		if sum_statement == nil {
+			sum_statement = &statement{}
+			statement_map[key_statement] = sum_statement
+		}
+		for _, b := range a {
+			for _, c := range statement_sheet {
+				if b == c.account {
+					sum_statement.value += c.value
+					sum_statement.quantity += c.quantity
+					sum_statement.value_base += c.value_base
+					sum_statement.quantity_base += c.quantity_base
+				}
+			}
+		}
+	}
+	var statement_sheet1 []statement
+	for key, v := range statement_map {
+		statement_sheet1 = append(statement_sheet1, statement{
+			account:                   key,
+			value:                     v.value,
+			price:                     v.value / v.quantity,
+			quantity:                  v.quantity,
+			percent:                   v.value / amount,
+			average:                   v.average,
+			turnover:                  0,
+			value_base:                v.value_base,
+			price_base:                v.value_base / v.quantity_base,
+			quantity_base:             v.quantity_base,
+			percent_base:              v.value_base / amount_base,
+			average_base:              v.average_base,
+			turnover_base:             0,
+			changes_since_base_period: v.value - v.value_base,
+			current_period_in_relation_to_base_period: v.value / v.value_base,
+		})
+	}
+	return statement_sheet1
 }
 
 func select_journal(entry_number uint, account string, start_date, end_date time.Time) []journal_tag {
@@ -1208,8 +1280,22 @@ func cost_volume_profit(name string, units, selling_price_per_unit, variable_cos
 func (s Managerial_Accounting) cost_volume_profit_slice() []cvp_statistics {
 	var j cvp_statistics
 	var h []cvp_statistics
-	var total_mixed_cost, total_sales, total_units, selling_price_per_unit, variable_cost_per_unit, fixed_cost float64
+	var total_mixed_cost, total_sales, total_units, selling_price_per_unit, variable_cost_per_unit, fixed_cost, total_fixed_cost float64
+	length_fixed_cost := len(s.fixed_cost)
+	total_portions := make([]float64, length_fixed_cost)
+	for _, i := range s.fixed_cost {
+		total_fixed_cost += i
+	}
+	if total_fixed_cost == 0 {
+		s.percent_method = "1"
+	}
 	for _, i := range s.cvp {
+		if length_fixed_cost != len(i.portions) {
+			log.Panic("length fixed_cost ", s.fixed_cost, " not equal length of portion ", i.portions)
+		}
+		for index, i := range i.portions {
+			total_portions[index] += i
+		}
 		j = cost_volume_profit(i.name, i.units, i.selling_price_per_unit, i.variable_cost_per_unit, i.fixed_cost)
 		h = append(h, j)
 		total_mixed_cost += j.mixed_cost
@@ -1229,8 +1315,16 @@ func (s Managerial_Accounting) cost_volume_profit_slice() []cvp_statistics {
 			percent = i.units / total_units
 		case "1":
 			percent = 1
+		case "portions":
+			var sum_portions_cost float64
+			for index1, i := range s.cvp[index].portions {
+				sum_portions_cost += i / total_portions[index1] * s.fixed_cost[index1]
+			}
+			percent = sum_portions_cost / total_fixed_cost
+		default:
+			log.Panic(s.percent_method, " is not in [mixed_cost,sales,units,1,portions]")
 		}
-		h[index] = cost_volume_profit(i.name, i.units, i.selling_price_per_unit, i.variable_cost_per_unit, i.fixed_cost+(percent*s.fixed_cost))
+		h[index] = cost_volume_profit(i.name, i.units, i.selling_price_per_unit, i.variable_cost_per_unit, i.fixed_cost+(percent*total_fixed_cost))
 		fixed_cost += h[index].fixed_cost
 	}
 	return append(h, cost_volume_profit("total", total_units, selling_price_per_unit/total_units, variable_cost_per_unit/total_units, fixed_cost))
@@ -1344,7 +1438,12 @@ func main() {
 		time.Date(2022, time.January, 1, 0, 0, 0, 0, time.Local),
 		time.Date(2022, time.January, 1, 0, 0, 0, 0, time.Local),
 		[][]string{
-			{"Assets", "cash", "book"},
+			{"Assets", "Current_assets"},
+			{"Current_assets", "Cash_and_cash_equivalent", "inventory"},
+			{"Cash_and_cash_equivalent", "cash"},
+			{"cash"},
+			{"inventory", "book"},
+			{"book"},
 			{"Liabilities", "tax"},
 			{"Equity", "retained_earnings", "income_summary"}},
 		[][]string{},
@@ -1369,9 +1468,9 @@ func main() {
 
 	// point := Managerial_Accounting{
 	// 	points_activity_level_and_cost_at_the_activity_level: [][2]float64{{2310, 10113}, {2453, 12691}, {2641, 10905}, {2874, 12949}, {3540, 15334}, {4861, 21455}, {5432, 21270}, {5268, 19930}, {4628, 21860}, {3720, 18383}, {2106, 9830}, {2495, 11081}},
-	// 	percent_method:                          "sales",
-	// 	cvp:                                     []cvp{{"book", 1, 20000, 15000, 0}, {"book1", 1, 80000, 40000, 0}},
-	// 	fixed_cost:                              27000,
+	// 	percent_method:                          "portions",
+	// 	cvp:                                     []cvp{{"book", 1, 20000, 15000, 0, []float64{4, 5}}, {"book1", 1, 80000, 40000, 0, []float64{4, 5}}},
+	// 	fixed_cost:                              []float64{27000, 1000},
 	// 	beginning_balance:                       200,
 	// 	increase:                                5000,
 	// 	ending_balance:                          400,
@@ -1392,4 +1491,36 @@ func main() {
 	// 	fmt.Fprintln(q, i.name, "\t", i.units, "\t", i.selling_price_per_unit, "\t", i.variable_cost_per_unit, "\t", i.fixed_cost, "\t", i.mixed_cost, "\t", i.mixed_cost_per_unit, "\t", i.sales, "\t", i.profit, "\t", i.profit_per_unit, "\t", i.contribution_margin_per_unit, "\t", i.contribution_margin, "\t", i.contribution_margin_ratio, "\t", i.break_even_in_unit, "\t", i.break_even_in_sales, "\t", i.degree_of_operating_leverage, "\t")
 	// }
 	// q.Flush()
+
+	o := account{
+		is_credit: false,
+		name:      "assets",
+		children: []account{
+			{
+				is_credit: false,
+				name:      "cash",
+				children:  []account{},
+			}, {
+				is_credit: false,
+				name:      "gold",
+				children: []account{
+					{
+						is_credit: false,
+						name:      "uuuuuuu",
+						children: []account{{
+							is_credit: false,
+							name:      "kkkk",
+							children:  []account{},
+						}},
+					}, {
+						is_credit: false,
+						name:      "iiiiiii",
+						children:  []account{},
+					},
+				},
+			},
+		},
+	}
+
+	fmt.Println(o)
 }
