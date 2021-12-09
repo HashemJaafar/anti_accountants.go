@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"os"
 	"reflect"
 	"strconv"
 	"strings"
+	"text/tabwriter"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -75,8 +77,10 @@ type journal_tag struct {
 }
 
 type statement struct {
-	account                string
-	value, price, quantity float64
+	account string
+	value, price, quantity, percent,
+	inflow, outflow, flow, flow_percent,
+	change_in_amount_since_base_period, current_results_in_relation_to_base_period float64
 }
 
 type financial_analysis struct {
@@ -103,7 +107,7 @@ type financial_analysis_statement struct {
 }
 
 type value_quantity struct {
-	value, quantity float64
+	value, quantity, inflow, outflow float64
 }
 
 type cvp_statistics struct {
@@ -542,11 +546,9 @@ func (s Financial_accounting) journal_entry(array_of_entry []Account_value_quant
 	return array_to_insert
 }
 
-func (s Financial_accounting) financial_statements(start_date, end_date time.Time) ([]statement, []statement, financial_analysis_statement) {
+func (s Financial_accounting) financial_statements(start_date, end_date time.Time, periods int) ([][]statement, []financial_analysis_statement) {
 	check_dates(start_date, end_date)
-	// d1 := int(end_date.Sub(start_date).Hours() / 24)
-	// start_base_date := end_base_date.AddDate(0, 0, -d1)
-	// d2 := int(end_base_date.Sub(start_base_date).Hours() / 24)
+	d1 := int(end_date.Sub(start_date).Hours() / 24)
 	var journal []journal_tag
 	rows, _ := db.Query("select date,entry_number,account,value,quantity from journal order by date")
 	for rows.Next() {
@@ -554,11 +556,17 @@ func (s Financial_accounting) financial_statements(start_date, end_date time.Tim
 		rows.Scan(&entry.date, &entry.entry_number, &entry.account, &entry.value, &entry.quantity)
 		journal = append(journal, entry)
 	}
-	balance_sheet1, cash_map1 := s.prepare_statment_map(journal, start_date, end_date)
-	analysis := s.prepare_statment_analysis(journal, start_date, end_date)
-	balance_sheet := s.prepare_statement(balance_sheet1)
-	cash_flow := s.prepare_statement(cash_map1)
-	return balance_sheet, cash_flow, analysis
+	statments_maps := []map[string]*value_quantity{}
+	var analysis []financial_analysis_statement
+	for a := 0; a < periods; a++ {
+		statments_maps = append(statments_maps, s.prepare_statment_map(journal, start_date.AddDate(0, 0, -d1*a), end_date.AddDate(0, 0, -d1*a)))
+		analysis = append(analysis, s.prepare_statment_analysis(journal, start_date.AddDate(0, 0, -d1*a), end_date.AddDate(0, 0, -d1*a)))
+	}
+	var statements [][]statement
+	for _, a := range statments_maps {
+		statements = append(statements, s.prepare_statement(a, statments_maps[periods-1]))
+	}
+	return statements, analysis
 }
 
 func (s Financial_accounting) invoice(array_of_journal_tag []journal_tag) []invoice_struct {
@@ -687,12 +695,11 @@ func (s Financial_accounting) cost_flow(account string, quantity float64, barcod
 	return costs
 }
 
-func (s Financial_accounting) prepare_statment_map(journal []journal_tag, start_date, end_date time.Time) (map[string]*value_quantity, map[string]*value_quantity) {
+func (s Financial_accounting) prepare_statment_map(journal []journal_tag, start_date, end_date time.Time) map[string]*value_quantity {
 	var cash []journal_tag
 	var ok bool
 	var previous_date string
-	journal_map := map[string]*value_quantity{s.retained_earnings: {0, 0}}
-	cash_map := map[string]*value_quantity{}
+	journal_map := map[string]*value_quantity{s.retained_earnings: {0, 0, 0, 0}}
 	for _, entry := range journal {
 		key_journal := entry.account
 		sum_journal := journal_map[key_journal]
@@ -704,18 +711,19 @@ func (s Financial_accounting) prepare_statment_map(journal []journal_tag, start_
 		if previous_date != entry.date {
 			if ok {
 				for _, entry := range cash {
-					key_cash := entry.account
-					sum_cash := cash_map[key_cash]
-					if sum_cash == nil {
-						sum_cash = &value_quantity{}
-						cash_map[key_cash] = sum_cash
-					}
+					sum_journal := journal_map[entry.account]
 					if is_in(entry.account, debit_accounts) {
-						sum_cash.value -= entry.value
-						sum_cash.quantity -= entry.quantity
+						if entry.value >= 0 {
+							sum_journal.outflow += entry.value
+						} else {
+							sum_journal.inflow -= entry.value
+						}
 					} else {
-						sum_cash.value += entry.value
-						sum_cash.quantity += entry.quantity
+						if entry.value < 0 {
+							sum_journal.outflow -= entry.value
+						} else {
+							sum_journal.inflow += entry.value
+						}
 					}
 				}
 			}
@@ -748,7 +756,37 @@ func (s Financial_accounting) prepare_statment_map(journal []journal_tag, start_
 			sum_journal.quantity += entry.quantity
 		}
 	}
-	return journal_map, cash_map
+	new_statement_map := map[string]*value_quantity{}
+	for key, v := range journal_map {
+		var last_name string
+		key1 := key
+		for {
+			for _, a := range s.accounts {
+				if a.name == key {
+					key = a.father
+					sum_statement := new_statement_map[a.name]
+					if sum_statement == nil {
+						sum_statement = &value_quantity{}
+						new_statement_map[a.name] = sum_statement
+					}
+					if is_in(key1, debit_accounts) == is_in(a.name, debit_accounts) {
+						sum_statement.value += v.value
+						sum_statement.quantity += v.quantity
+					} else {
+						sum_statement.value -= v.value
+						sum_statement.quantity -= v.quantity
+					}
+					sum_statement.inflow += v.inflow
+					sum_statement.outflow += v.outflow
+				}
+			}
+			if last_name == key {
+				break
+			}
+			last_name = key
+		}
+	}
+	return new_statement_map
 }
 
 func (s Financial_accounting) prepare_statment_analysis(journal []journal_tag, start_date, end_date time.Time) financial_analysis_statement {
@@ -872,49 +910,56 @@ func (s Financial_accounting) prepare_statment_analysis(journal []journal_tag, s
 	}.financial_analysis_statement()
 }
 
-func (s Financial_accounting) prepare_statement(statement_map map[string]*value_quantity) []statement {
+func (s Financial_accounting) prepare_statement(statement_map, statement_map_base map[string]*value_quantity) []statement {
 	var statement_sheet []statement
-	new_statement_map := map[string]*value_quantity{}
+	var total_assets, total_sales, total float64
 	for key, v := range statement_map {
-		var last_name string
-		key1 := key
-		for {
-			for _, a := range s.accounts {
-				if a.name == key {
-					key = a.father
-					sum_statement := new_statement_map[a.name]
-					if sum_statement == nil {
-						sum_statement = &value_quantity{}
-						new_statement_map[a.name] = sum_statement
-					}
-					if is_in(key1, debit_accounts) == is_in(a.name, debit_accounts) {
-						sum_statement.value += v.value
-						sum_statement.quantity += v.quantity
-					} else {
-						sum_statement.value -= v.value
-						sum_statement.quantity -= v.quantity
-					}
-				}
-			}
-			if last_name == key {
-				break
-			}
-			last_name = key
+		if key == s.assets {
+			total_assets = v.value
+		}
+		if is_in(key, sales) {
+			total_sales += v.value
 		}
 	}
-	for key, v := range new_statement_map {
+	for key, v := range statement_map {
+		if !s.is_account_equal(s.income_statement, key) {
+			total = total_assets
+		} else {
+			total = total_sales
+		}
+		var base_year_amount float64
+		for key1, v1 := range statement_map_base {
+			if key == key1 {
+				base_year_amount = v1.value
+				break
+			}
+		}
 		statement_sheet = append(statement_sheet, statement{
-			account:  key,
-			value:    v.value,
-			price:    v.value / v.quantity,
-			quantity: v.quantity,
+			account:                            key,
+			value:                              v.value,
+			price:                              v.value / v.quantity,
+			quantity:                           v.quantity,
+			percent:                            v.value / total,
+			inflow:                             v.inflow,
+			outflow:                            v.outflow,
+			flow:                               v.inflow - v.outflow,
+			flow_percent:                       0,
+			change_in_amount_since_base_period: v.value - base_year_amount,
+			current_results_in_relation_to_base_period: v.value / base_year_amount,
 		})
 	}
 	var index int
 	for index < len(statement_sheet) {
 		if (statement_sheet[index].value == 0 || math.IsNaN(statement_sheet[index].value)) &&
 			(statement_sheet[index].price == 0 || math.IsNaN(statement_sheet[index].price)) &&
-			(statement_sheet[index].quantity == 0 || math.IsNaN(statement_sheet[index].quantity)) {
+			(statement_sheet[index].quantity == 0 || math.IsNaN(statement_sheet[index].quantity)) &&
+			(statement_sheet[index].percent == 0 || math.IsNaN(statement_sheet[index].percent)) &&
+			(statement_sheet[index].inflow == 0 || math.IsNaN(statement_sheet[index].inflow)) &&
+			(statement_sheet[index].outflow == 0 || math.IsNaN(statement_sheet[index].outflow)) &&
+			(statement_sheet[index].flow == 0 || math.IsNaN(statement_sheet[index].flow)) &&
+			(statement_sheet[index].flow_percent == 0 || math.IsNaN(statement_sheet[index].flow_percent)) &&
+			(statement_sheet[index].change_in_amount_since_base_period == 0 || math.IsNaN(statement_sheet[index].change_in_amount_since_base_period)) &&
+			(statement_sheet[index].current_results_in_relation_to_base_period == 0 || math.IsNaN(statement_sheet[index].current_results_in_relation_to_base_period)) {
 			statement_sheet = append(statement_sheet[:index], statement_sheet[index+1:]...)
 		} else {
 			index++
@@ -1416,19 +1461,23 @@ func main() {
 	// 	fmt.Fprintln(r, "\t", i.date, "\t", i.entry_number, "\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.barcode, "\t", i.entry_expair, "\t", i.description, "\t", i.name, "\t", i.employee_name, "\t", i.entry_date, "\t", i.reverse)
 	// }
 	// r.Flush()
-	_, _, financial_analysis_statement := v.financial_statements(
-		time.Date(2021, time.January, 1, 0, 0, 0, 0, time.Local),
-		time.Date(2021, time.January, 1, 0, 0, 0, 0, time.Local))
-	// w := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
-	// for _, i := range balance_sheet {
-	// 	fmt.Fprintln(w, "balance_sheet\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t")
-	// }
-	// for _, i := range cash_flow {
-	// 	fmt.Fprintln(w, "cash_flow\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t")
-	// }
-	// w.Flush()
-	fmt.Println(financial_analysis_statement)
-
+	balance_sheet, financial_analysis_statement := v.financial_statements(
+		time.Date(2000, time.December, 1, 0, 0, 0, 0, time.Local),
+		time.Date(2022, time.January, 1, 0, 0, 0, 0, time.Local),
+		1)
+	var cash float64
+	w := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
+	for index, a := range balance_sheet {
+		for _, b := range a {
+			cash += b.flow
+			fmt.Fprintln(w, index, "\t", b.account, "\t", b.value, "\t", b.price, "\t", b.quantity, "\t", b.percent, "\t", b.inflow, "\t", b.outflow, "\t", b.flow, "\t", b.change_in_amount_since_base_period, "\t", b.current_results_in_relation_to_base_period)
+		}
+	}
+	w.Flush()
+	fmt.Println(cash, 2182+104-100)
+	for _, a := range financial_analysis_statement {
+		fmt.Println(a)
+	}
 	// point := Managerial_Accounting{
 	// 	cvp: []cvp{
 	// 		{"fe", 4, 4000, 1000, 0, []float64{4, 5}},
