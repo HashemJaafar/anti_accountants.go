@@ -709,24 +709,7 @@ func (s Financial_accounting) prepare_statment_map(journal []journal_tag, start_
 		}
 		date := s.parse_date(entry.date)
 		if previous_date != entry.date {
-			if ok {
-				for _, entry := range cash {
-					sum_journal := journal_map[entry.account]
-					if is_in(entry.account, debit_accounts) {
-						if entry.value >= 0 {
-							sum_journal.outflow += entry.value
-						} else {
-							sum_journal.inflow -= entry.value
-						}
-					} else {
-						if entry.value < 0 {
-							sum_journal.outflow -= entry.value
-						} else {
-							sum_journal.inflow += entry.value
-						}
-					}
-				}
-			}
+			sum_cash_flow(ok, cash, journal_map)
 			cash = []journal_tag{}
 			ok = false
 		}
@@ -756,6 +739,7 @@ func (s Financial_accounting) prepare_statment_map(journal []journal_tag, start_
 			sum_journal.quantity += entry.quantity
 		}
 	}
+	sum_cash_flow(ok, cash, journal_map)
 	new_statement_map := map[string]*value_quantity{}
 	for key, v := range journal_map {
 		var last_name string
@@ -1014,6 +998,27 @@ func (s Financial_accounting) return_status(name string) string {
 		}
 	}
 	return ""
+}
+
+func sum_cash_flow(ok bool, cash []journal_tag, journal_map map[string]*value_quantity) {
+	if ok {
+		for _, entry := range cash {
+			sum_journal := journal_map[entry.account]
+			if is_in(entry.account, debit_accounts) {
+				if entry.value >= 0 {
+					sum_journal.outflow += entry.value
+				} else {
+					sum_journal.inflow -= entry.value
+				}
+			} else {
+				if entry.value < 0 {
+					sum_journal.outflow -= entry.value
+				} else {
+					sum_journal.inflow += entry.value
+				}
+			}
+		}
+	}
 }
 
 func select_journal(entry_number uint, account string, start_date, end_date time.Time) []journal_tag {
@@ -1462,19 +1467,16 @@ func main() {
 	// }
 	// r.Flush()
 	balance_sheet, financial_analysis_statement := v.financial_statements(
-		time.Date(2000, time.December, 1, 0, 0, 0, 0, time.Local),
+		time.Date(2000, time.January, 1, 0, 0, 0, 0, time.Local),
 		time.Date(2022, time.January, 1, 0, 0, 0, 0, time.Local),
 		1)
-	var cash float64
 	w := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
 	for index, a := range balance_sheet {
 		for _, b := range a {
-			cash += b.flow
 			fmt.Fprintln(w, index, "\t", b.account, "\t", b.value, "\t", b.price, "\t", b.quantity, "\t", b.percent, "\t", b.inflow, "\t", b.outflow, "\t", b.flow, "\t", b.change_in_amount_since_base_period, "\t", b.current_results_in_relation_to_base_period)
 		}
 	}
 	w.Flush()
-	fmt.Println(cash, 2182+104-100)
 	for _, a := range financial_analysis_statement {
 		fmt.Println(a)
 	}
