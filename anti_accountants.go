@@ -546,7 +546,7 @@ func (s Financial_accounting) journal_entry(array_of_entry []Account_value_quant
 	return array_to_insert
 }
 
-func (s Financial_accounting) financial_statements(start_date, end_date time.Time, periods int) ([][]statement, []financial_analysis_statement) {
+func (s Financial_accounting) financial_statements(start_date, end_date time.Time, periods int) ([][]statement, []financial_analysis_statement, []map[string]map[string]map[string]map[string]float64) {
 	check_dates(start_date, end_date)
 	d1 := int(end_date.Sub(start_date).Hours() / 24)
 	var journal []journal_tag
@@ -556,17 +556,21 @@ func (s Financial_accounting) financial_statements(start_date, end_date time.Tim
 		rows.Scan(&entry.date, &entry.entry_number, &entry.account, &entry.value, &entry.quantity)
 		journal = append(journal, entry)
 	}
+	all_flows_for_all := []map[string]map[string]map[string]map[string]float64{}
 	statments_maps := []map[string]*value_quantity{}
 	var analysis []financial_analysis_statement
 	for a := 0; a < periods; a++ {
-		statments_maps = append(statments_maps, s.prepare_statment_map(journal, start_date.AddDate(0, 0, -d1*a), end_date.AddDate(0, 0, -d1*a)))
-		analysis = append(analysis, s.prepare_statment_analysis(journal, start_date.AddDate(0, 0, -d1*a), end_date.AddDate(0, 0, -d1*a)))
+		start_date_to_enter := start_date.AddDate(0, 0, -d1*a)
+		end_date_to_enter := end_date.AddDate(0, 0, -d1*a)
+		all_flows_for_all = append(all_flows_for_all, s.all_flows(journal, start_date_to_enter, end_date_to_enter))
+		statments_maps = append(statments_maps, s.prepare_statment_map(journal, start_date_to_enter, end_date_to_enter))
+		analysis = append(analysis, s.prepare_statment_analysis(journal, start_date_to_enter, end_date_to_enter))
 	}
 	var statements [][]statement
 	for _, a := range statments_maps {
 		statements = append(statements, s.prepare_statement(a, statments_maps[periods-1]))
 	}
-	return statements, analysis
+	return statements, analysis, all_flows_for_all
 }
 
 func (s Financial_accounting) invoice(array_of_journal_tag []journal_tag) []invoice_struct {
@@ -695,6 +699,68 @@ func (s Financial_accounting) cost_flow(account string, quantity float64, barcod
 	return costs
 }
 
+func (s Financial_accounting) all_flows(journal []journal_tag, start_date, end_date time.Time) map[string]map[string]map[string]map[string]float64 {
+	var one_compound_entry []journal_tag
+	var previous_date string
+	all_flows := map[string]map[string]map[string]map[string]float64{}
+	for _, entry := range journal {
+		date := s.parse_date(entry.date)
+		if previous_date != entry.date {
+			sum_flows(one_compound_entry, all_flows)
+			one_compound_entry = []journal_tag{}
+		}
+		if date.After(start_date) && date.Before(end_date) {
+			one_compound_entry = append(one_compound_entry, entry)
+		}
+		previous_date = entry.date
+	}
+	sum_flows(one_compound_entry, all_flows)
+	return all_flows
+}
+
+func sum_flows(one_compound_entry []journal_tag, all_flows map[string]map[string]map[string]map[string]float64) {
+	for _, a := range one_compound_entry {
+		if all_flows[a.account] == nil {
+			all_flows[a.account] = map[string]map[string]map[string]float64{}
+		}
+		for _, b := range one_compound_entry {
+			if all_flows[a.account][b.account] == nil {
+				all_flows[a.account][b.account] = map[string]map[string]float64{}
+			}
+			if all_flows[a.account][b.account][b.name] == nil {
+				all_flows[a.account][b.account][b.name] = map[string]float64{}
+			}
+			if all_flows[a.account][b.account][b.name] == nil {
+				all_flows[a.account][b.account][b.name] = map[string]float64{}
+			}
+			all_flows[a.account][b.account][b.name]["value_increase"] += b.value
+			all_flows[a.account][b.account][b.name]["quantity_increase"] += b.quantity
+			if b.account == a.account {
+				if b.value < 0 {
+					all_flows[a.account][b.account][b.name]["outflow"] -= b.value
+				} else {
+					all_flows[a.account][b.account][b.name]["inflow"] += b.value
+				}
+				all_flows[a.account][b.account][b.name]["flow"] += b.value
+			} else if is_in(b.account, debit_accounts) == is_in(a.account, debit_accounts) {
+				if b.value >= 0 {
+					all_flows[a.account][b.account][b.name]["outflow"] += b.value
+				} else {
+					all_flows[a.account][b.account][b.name]["inflow"] -= b.value
+				}
+				all_flows[a.account][b.account][b.name]["flow"] -= b.value
+			} else {
+				if b.value < 0 {
+					all_flows[a.account][b.account][b.name]["outflow"] -= b.value
+				} else {
+					all_flows[a.account][b.account][b.name]["inflow"] += b.value
+				}
+				all_flows[a.account][b.account][b.name]["flow"] += b.value
+			}
+		}
+	}
+}
+
 func (s Financial_accounting) prepare_statment_map(journal []journal_tag, start_date, end_date time.Time) map[string]*value_quantity {
 	var cash []journal_tag
 	var ok bool
@@ -781,91 +847,111 @@ func (s Financial_accounting) prepare_statment_analysis(journal []journal_tag, s
 		v_ebitda, v_interest_expense float64
 
 	// for _, entry := range journal {
-	// 	var is_in_period bool
 	// 	date := s.parse_date(entry.date)
 	// 	if date.After(end_date) {
 	// 		continue
 	// 	}
-	// 	if date.After(start_date) {
-	// 		is_in_period = true
+	// 	var index int
+	// 	var daddies []string
+	// 	var last_name, status string
+	// 	name := entry.account
+	// 	for {
+	// 		for _, a := range s.accounts {
+	// 			if a.name == name {
+	// 				name = a.father
+	// 				daddies = append(daddies, name)
+	// 				if index == 0 {
+	// 					status = a.status
+	// 				}
+	// 				index++
+	// 			}
+	// 		}
+	// 		if last_name == name {
+	// 			break
+	// 		}
+	// 		last_name = name
 	// 	}
-	// 	if is_in(entry.account,current_assets) {
+	// 	fmt.Println(entry.account, daddies, status)
+	// 	// this need period
+	// 	if date.After(start_date) {
+	// 		// this need average
+	// 		if true { //"average_net_receivables"
+	// 			v_average_net_receivables += entry.value / 2
+	// 		}
+	// 		if true { //"average_inventory"
+	// 			v_average_inventory += entry.value / 2
+	// 		}
+	// 		if true { //"average_assets"
+	// 			v_average_assets += entry.value / 2
+	// 		}
+	// 		if true { //"average_common_stockholders_equity"
+	// 			v_average_common_stockholders_equity += entry.value / 2
+	// 		}
+	// 		if true { //"net_income"
+	// 			v_net_income += entry.value
+	// 		}
+	// 		if true { //"net_sales"
+	// 			v_net_sales += entry.value
+	// 		}
+	// 		// this need flow
+	// 		if is_in(status, []string{"fifo", "lifo", "wma"}) && entry.value < 0 { //"cost_of_goods_sold"
+	// 			v_cost_of_goods_sold -= entry.value
+	// 		}
+	// 		if status == "sales" { //"net_credit_sales"
+	// 			v_net_credit_sales += entry.value
+	// 		}
+	// 		if is_in(status, []string{"cash_and_cash_equivalent"}) && entry.value < 0 { //"cash_dividends"
+	// 			v_cash_dividends -= entry.value
+	// 		}
+	// 	}
+	// 	// this need sum
+	// 	// this need average
+	// 	if true { //"average_net_receivables"
+	// 		v_average_net_receivables += entry.value
+	// 	}
+	// 	if true { //"average_inventory"
+	// 		v_average_inventory += entry.value
+	// 	}
+	// 	if true { //"average_assets"
+	// 		v_average_assets += entry.value
+	// 	}
+	// 	if true { //"average_common_stockholders_equity"
+	// 		v_average_common_stockholders_equity += entry.value
+	// 	}
+	// 	if true { //is_in(entry.account, current_assets)
 	// 		v_current_assets += entry.value
 	// 	}
-	// 	if "current_liabilities" {
+	// 	if true { //"current_liabilities"
 	// 		v_current_liabilities += entry.value
 	// 	}
-	// 	if "cash" {
+	// 	if true { //"cash"
 	// 		v_cash += entry.value
 	// 	}
-	// 	if "short_term_investments" {
+	// 	if true { //"short_term_investments"
 	// 		v_short_term_investments += entry.value
 	// 	}
-	// 	if "net_receivables" {
+	// 	if true { //"net_receivables"
 	// 		v_net_receivables += entry.value
 	// 	}
-	// 	if "net_credit_sales" {
-	// 		v_net_credit_sales += entry.value
-	// 	}
-	// 	if "average_net_receivables" {
-	// 		if is_in_period {
-	// 			v_average_net_receivables += entry.value / 2
-	// 		} else {
-	// 			v_average_net_receivables += entry.value
-	// 		}
-	// 	}
-	// 	if "cost_of_goods_sold" {
-	// 		v_cost_of_goods_sold += entry.value
-	// 	}
-	// 	if "average_inventory" {
-	// 		if is_in_period {
-	// 			v_average_inventory += entry.value / 2
-	// 		} else {
-	// 			v_average_inventory += entry.value
-	// 		}
-	// 	}
-	// 	if "net_income" {
-	// 		v_net_income += entry.value
-	// 	}
-	// 	if "net_sales" {
-	// 		v_net_sales += entry.value
-	// 	}
-	// 	if "average_assets" {
-	// 		if is_in_period {
-	// 			v_average_assets += entry.value / 2
-	// 		} else {
-	// 			v_average_assets += entry.value
-	// 		}
-	// 	}
-	// 	if "preferred_dividends" {
+	// 	if true { //"preferred_dividends"
 	// 		v_preferred_dividends += entry.value
 	// 	}
-	// 	if "average_common_stockholders_equity" {
-	// 		if is_in_period {
-	// 			v_average_common_stockholders_equity += entry.value / 2
-	// 		} else {
-	// 			v_average_common_stockholders_equity += entry.value
-	// 		}
-	// 	}
-	// 	if "weighted_average_common_shares_outstanding" {
+	// 	if true { //"weighted_average_common_shares_outstanding"
 	// 		v_weighted_average_common_shares_outstanding += entry.value
 	// 	}
-	// 	if "market_price_per_shares_outstanding" {
+	// 	if true { //"market_price_per_shares_outstanding"
 	// 		v_market_price_per_shares_outstanding += entry.value
 	// 	}
-	// 	if "cash_dividends" {
-	// 		v_cash_dividends += entry.value
-	// 	}
-	// 	if "total_debt" {
+	// 	if true { //"total_debt"
 	// 		v_total_debt += entry.value
 	// 	}
-	// 	if "total_assets" {
+	// 	if true { //"total_assets"
 	// 		v_total_assets += entry.value
 	// 	}
-	// 	if "income_before_income_taxes_and_interest_expense" {
+	// 	if true { //"income_before_income_taxes_and_interest_expense"
 	// 		v_ebitda += entry.value
 	// 	}
-	// 	if "interest_expense" {
+	// 	if true { //"interest_expense"
 	// 		v_interest_expense += entry.value
 	// 	}
 	// }
@@ -1466,7 +1552,7 @@ func main() {
 	// 	fmt.Fprintln(r, "\t", i.date, "\t", i.entry_number, "\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.barcode, "\t", i.entry_expair, "\t", i.description, "\t", i.name, "\t", i.employee_name, "\t", i.entry_date, "\t", i.reverse)
 	// }
 	// r.Flush()
-	balance_sheet, financial_analysis_statement := v.financial_statements(
+	balance_sheet, _, all_flows_for_all := v.financial_statements(
 		time.Date(2000, time.January, 1, 0, 0, 0, 0, time.Local),
 		time.Date(2022, time.January, 1, 0, 0, 0, 0, time.Local),
 		1)
@@ -1477,9 +1563,24 @@ func main() {
 		}
 	}
 	w.Flush()
-	for _, a := range financial_analysis_statement {
-		fmt.Println(a)
+	// for _, a := range financial_analysis_statement {
+	// 	fmt.Println(a)
+	// }
+	r := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
+	for _, v := range all_flows_for_all {
+		for keya, a := range v {
+			for keyb, b := range a {
+				for keyc, c := range b {
+					for keyd, d := range c {
+						if keya == "cash" && keyd == "value_increase" {
+							fmt.Fprintln(r, keya, "\t", keyb, "\t", keyc, "\t", keyd, "\t", d)
+						}
+					}
+				}
+			}
+		}
 	}
+	r.Flush()
 	// point := Managerial_Accounting{
 	// 	cvp: []cvp{
 	// 		{"fe", 4, 4000, 1000, 0, []float64{4, 5}},
