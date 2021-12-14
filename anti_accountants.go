@@ -79,11 +79,11 @@ type journal_tag struct {
 type statement struct {
 	account string
 	value_normal, value_average, value_increase, value_decrease, value_increase_or_decrease, value_inflow,
-	value_outflow, value_flow, value_percent, value_change_since_base_period, value_growth_ratio_to_base_period,
+	value_outflow, value_flow, value_turnover, value_percent, value_change_since_base_period, value_growth_ratio_to_base_period,
 	price_normal, price_average, price_increase, price_decrease, price_increase_or_decrease, price_inflow,
-	price_outflow, price_flow, price_percent, price_change_since_base_period, price_growth_ratio_to_base_period,
+	price_outflow, price_flow, price_turnover, price_percent, price_change_since_base_period, price_growth_ratio_to_base_period,
 	quantity_normal, quantity_average, quantity_increase, quantity_decrease, quantity_increase_or_decrease, quantity_inflow,
-	quantity_outflow, quantity_flow, quantity_percent, quantity_change_since_base_period, quantity_growth_ratio_to_base_period float64
+	quantity_outflow, quantity_flow, quantity_turnover, quantity_percent, quantity_change_since_base_period, quantity_growth_ratio_to_base_period float64
 }
 
 type financial_analysis struct {
@@ -549,30 +549,30 @@ func (s Financial_accounting) journal_entry(array_of_entry []Account_value_quant
 	return array_to_insert
 }
 
-func (s Financial_accounting) financial_statements(start_date, end_date time.Time, periods int, names []string) ([][]statement, []financial_analysis_statement, []map[string]map[string]map[string]map[string]map[string]float64) {
+func (s Financial_accounting) financial_statements(start_date, end_date time.Time, periods int, names []string) ([][]statement, []financial_analysis_statement, []map[string]map[string]map[string]map[string]map[string]float64, []journal_tag) {
 	check_dates(start_date, end_date)
 	d1 := int(end_date.Sub(start_date).Hours() / 24)
 	var journal []journal_tag
-	rows, _ := db.Query("select date,entry_number,account,value,quantity,name from journal order by date,entry_number")
+	rows, _ := db.Query("select * from journal order by date,entry_number")
 	for rows.Next() {
 		var entry journal_tag
-		rows.Scan(&entry.date, &entry.entry_number, &entry.account, &entry.value, &entry.quantity, &entry.name)
+		rows.Scan(&entry.date, &entry.entry_number, &entry.account, &entry.value, &entry.price, &entry.quantity, &entry.barcode, &entry.entry_expair, &entry.description, &entry.name, &entry.employee_name, &entry.entry_date, &entry.reverse)
 		journal = append(journal, entry)
 	}
 	all_values_for_all := []map[string]map[string]map[string]map[string]map[string]float64{}
-	var analysis []financial_analysis_statement
 	for a := 0; a < periods; a++ {
 		start_date_to_enter := start_date.AddDate(0, 0, -d1*a)
 		end_date_to_enter := end_date.AddDate(0, 0, -d1*a)
-		all_values := s.all_values(journal, start_date_to_enter, end_date_to_enter)
-		all_values_for_all = append(all_values_for_all, all_values)
-		analysis = append(analysis, s.prepare_statment_analysis(journal, start_date_to_enter, end_date_to_enter, all_values, names))
+		all_values_for_all = append(all_values_for_all, s.all_values(journal, start_date_to_enter, end_date_to_enter))
 	}
+	var all_analysis []financial_analysis_statement
 	var statements [][]statement
 	for _, a := range all_values_for_all {
-		statements = append(statements, s.prepare_statement(a, all_values_for_all[periods-1], cash_and_cash_equivalent, names))
+		statement, analysis := s.prepare_statement(a, all_values_for_all[periods-1], cash_and_cash_equivalent, names)
+		statements = append(statements, statement)
+		all_analysis = append(all_analysis, analysis)
 	}
-	return statements, analysis, all_values_for_all
+	return statements, all_analysis, all_values_for_all, journal
 }
 
 func (s Financial_accounting) invoice(array_of_journal_tag []journal_tag) []invoice_struct {
@@ -745,7 +745,7 @@ func (s Financial_accounting) all_values(journal []journal_tag, start_date, end_
 								}
 								for keye, e := range d {
 									switch {
-									case !is_in(keye, []string{"inflow", "outflow", "flow"}):
+									case !is_in(keye, []string{"inflow", "outflow", "flow", "increase", "decrease", "increase_or_decrease"}):
 										if is_in(key1, debit_accounts) == is_in(ss.name, debit_accounts) {
 											new_all_values[keya][ss.name][keyc][keyd][keye] += e
 										} else {
@@ -756,10 +756,6 @@ func (s Financial_accounting) all_values(journal []journal_tag, start_date, end_
 									case keya == ss.name:
 										new_all_values[keya][key1][keyc][keyd][keye] += e
 									}
-									if new_all_values[keya][ss.name][keyc]["price"] == nil {
-										new_all_values[keya][ss.name][keyc]["price"] = map[string]float64{}
-									}
-									new_all_values[keya][key1][keyc]["price"][keye] = all_values[keya][key1][keyc]["value"][keye] / all_values[keya][key1][keyc]["quantity"][keye]
 								}
 							}
 						}
@@ -769,6 +765,30 @@ func (s Financial_accounting) all_values(journal []journal_tag, start_date, end_
 					break
 				}
 				last_name = keyb
+			}
+		}
+	}
+	for _, a := range new_all_values {
+		for _, b := range a {
+			for _, c := range b {
+				for _, d := range c {
+					for keye, _ := range d {
+						if c["value"] == nil {
+							c["value"] = map[string]float64{}
+						}
+						if c["price"] == nil {
+							c["price"] = map[string]float64{}
+						}
+						if c["quantity"] == nil {
+							c["quantity"] = map[string]float64{}
+						}
+						c["price"][keye] = c["value"][keye] / c["quantity"][keye]
+						c["value"]["turnover"] = c["value"]["inflow"] / c["value"]["average"]
+						c["price"]["turnover"] = c["price"]["inflow"] / c["price"]["average"]
+						c["quantity"]["turnover"] = c["quantity"]["inflow"] / c["quantity"]["average"]
+
+					}
+				}
 			}
 		}
 	}
@@ -848,160 +868,40 @@ func (s Financial_accounting) sum_values(date, start_date time.Time, one_compoun
 	}
 }
 
-func (s Financial_accounting) prepare_statment_analysis(journal []journal_tag, start_date, end_date time.Time, statement_map map[string]map[string]map[string]map[string]map[string]float64, names []string) financial_analysis_statement {
-	// new_statement_map := sum_and_extract_new_map(statement_map, flow_account, names)
-	var v_current_assets, v_current_liabilities, v_cash, v_short_term_investments, v_net_receivables, v_net_credit_sales,
-		v_average_net_receivables, v_cost_of_goods_sold, v_average_inventory, v_net_income, v_net_sales, v_average_assets,
-		v_preferred_dividends, v_average_common_stockholders_equity, v_weighted_average_common_shares_outstanding,
-		v_market_price_per_shares_outstanding, v_cash_dividends, v_total_debt, v_total_assets,
-		v_ebitda, v_interest_expense float64
-
-	// for _, entry := range journal {
-	// 	date := s.parse_date(entry.date)
-	// 	if date.After(end_date) {
-	// 		continue
-	// 	}
-	// 	var index int
-	// 	var daddies []string
-	// 	var last_name, status string
-	// 	name := entry.account
-	// 	for {
-	// 		for _, a := range s.accounts {
-	// 			if a.name == name {
-	// 				name = a.father
-	// 				daddies = append(daddies, name)
-	// 				if index == 0 {
-	// 					status = a.status
-	// 				}
-	// 				index++
-	// 			}
-	// 		}
-	// 		if last_name == name {
-	// 			break
-	// 		}
-	// 		last_name = name
-	// 	}
-	// 	fmt.Println(entry.account, daddies, status)
-	// 	// this need period
-	// 	if date.After(start_date) {
-	// 		// this need average
-	// 		if true { //"average_net_receivables"
-	// 			v_average_net_receivables += entry.value / 2
-	// 		}
-	// 		if true { //"average_inventory"
-	// 			v_average_inventory += entry.value / 2
-	// 		}
-	// 		if true { //"average_assets"
-	// 			v_average_assets += entry.value / 2
-	// 		}
-	// 		if true { //"average_common_stockholders_equity"
-	// 			v_average_common_stockholders_equity += entry.value / 2
-	// 		}
-	// 		if true { //"net_income"
-	// 			v_net_income += entry.value
-	// 		}
-	// 		if true { //"net_sales"
-	// 			v_net_sales += entry.value
-	// 		}
-	// 		// this need flow
-	// 		if is_in(status, []string{"fifo", "lifo", "wma"}) && entry.value < 0 { //"cost_of_goods_sold"
-	// 			v_cost_of_goods_sold -= entry.value
-	// 		}
-	// 		if status == "sales" { //"net_credit_sales"
-	// 			v_net_credit_sales += entry.value
-	// 		}
-	// 		if is_in(status, []string{"cash_and_cash_equivalent"}) && entry.value < 0 { //"cash_dividends"
-	// 			v_cash_dividends -= entry.value
-	// 		}
-	// 	}
-	// 	// this need sum
-	// 	// this need average
-	// 	if true { //"average_net_receivables"
-	// 		v_average_net_receivables += entry.value
-	// 	}
-	// 	if true { //"average_inventory"
-	// 		v_average_inventory += entry.value
-	// 	}
-	// 	if true { //"average_assets"
-	// 		v_average_assets += entry.value
-	// 	}
-	// 	if true { //"average_common_stockholders_equity"
-	// 		v_average_common_stockholders_equity += entry.value
-	// 	}
-	// 	if true { //is_in(entry.account, current_assets)
-	// 		v_current_assets += entry.value
-	// 	}
-	// 	if true { //"current_liabilities"
-	// 		v_current_liabilities += entry.value
-	// 	}
-	// 	if true { //"cash"
-	// 		v_cash += entry.value
-	// 	}
-	// 	if true { //"short_term_investments"
-	// 		v_short_term_investments += entry.value
-	// 	}
-	// 	if true { //"net_receivables"
-	// 		v_net_receivables += entry.value
-	// 	}
-	// 	if true { //"preferred_dividends"
-	// 		v_preferred_dividends += entry.value
-	// 	}
-	// 	if true { //"weighted_average_common_shares_outstanding"
-	// 		v_weighted_average_common_shares_outstanding += entry.value
-	// 	}
-	// 	if true { //"market_price_per_shares_outstanding"
-	// 		v_market_price_per_shares_outstanding += entry.value
-	// 	}
-	// 	if true { //"total_debt"
-	// 		v_total_debt += entry.value
-	// 	}
-	// 	if true { //"total_assets"
-	// 		v_total_assets += entry.value
-	// 	}
-	// 	if true { //"income_before_income_taxes_and_interest_expense"
-	// 		v_ebitda += entry.value
-	// 	}
-	// 	if true { //"interest_expense"
-	// 		v_interest_expense += entry.value
-	// 	}
-	// }
-	return financial_analysis{
-		current_assets:                      v_current_assets,
-		current_liabilities:                 v_current_liabilities,
-		cash:                                v_cash,
-		short_term_investments:              v_short_term_investments,
-		net_receivables:                     v_net_receivables,
-		net_credit_sales:                    v_net_credit_sales,
-		average_net_receivables:             v_average_net_receivables,
-		cost_of_goods_sold:                  v_cost_of_goods_sold,
-		average_inventory:                   v_average_inventory,
-		net_income:                          v_net_income,
-		net_sales:                           v_net_sales,
-		average_assets:                      v_average_assets,
-		preferred_dividends:                 v_preferred_dividends,
-		average_common_stockholders_equity:  v_average_common_stockholders_equity,
-		market_price_per_shares_outstanding: v_market_price_per_shares_outstanding,
-		cash_dividends:                      v_cash_dividends,
-		total_debt:                          v_total_debt,
-		total_assets:                        v_total_assets,
-		ebitda:                              v_ebitda,
-		interest_expense:                    v_interest_expense,
-		weighted_average_common_shares_outstanding: v_weighted_average_common_shares_outstanding,
-	}.financial_analysis_statement()
-}
-
-func (s Financial_accounting) prepare_statement(statement_map, statement_map_base map[string]map[string]map[string]map[string]map[string]float64, flow_account, names []string) []statement {
+func (s Financial_accounting) prepare_statement(statement_map, statement_map_base map[string]map[string]map[string]map[string]map[string]float64, flow_account, names []string) ([]statement, financial_analysis_statement) {
 	new_statement_map := sum_and_extract_new_map(statement_map, flow_account, names)
 	new_statement_map_base := sum_and_extract_new_map(statement_map_base, flow_account, names)
-	var value_total_assets, price_total_assets, quantity_total_assets,
-		value_total_sales, price_total_sales, quantity_total_sales,
+
+	analysis := financial_analysis{
+		current_assets:                      0,
+		current_liabilities:                 0,
+		cash:                                0,
+		short_term_investments:              0,
+		net_receivables:                     0,
+		net_credit_sales:                    0,
+		average_net_receivables:             0,
+		cost_of_goods_sold:                  0,
+		average_inventory:                   0,
+		net_income:                          0,
+		net_sales:                           0,
+		average_assets:                      0,
+		preferred_dividends:                 0,
+		average_common_stockholders_equity:  0,
+		market_price_per_shares_outstanding: 0,
+		cash_dividends:                      0,
+		total_debt:                          0,
+		total_assets:                        0,
+		ebitda:                              0,
+		interest_expense:                    0,
+		weighted_average_common_shares_outstanding: 0,
+	}.financial_analysis_statement()
+
+	value_total_assets := new_statement_map[s.assets]["value"]["normal"]
+	price_total_assets := new_statement_map[s.assets]["price"]["normal"]
+	quantity_total_assets := new_statement_map[s.assets]["quantity"]["normal"]
+	var value_total_sales, price_total_sales, quantity_total_sales,
 		value_total, price_total, quantity_total float64
 	for key, v := range new_statement_map {
-		if key == s.assets {
-			value_total_assets = v["value"]["normal"]
-			price_total_assets = v["price"]["normal"]
-			quantity_total_assets = v["quantity"]["normal"]
-		}
 		if is_in(key, sales) {
 			value_total_sales += v["value"]["normal"]
 			price_total_sales += v["price"]["normal"]
@@ -1030,6 +930,7 @@ func (s Financial_accounting) prepare_statement(statement_map, statement_map_bas
 			value_inflow:                         v["value"]["inflow"],
 			value_outflow:                        v["value"]["outflow"],
 			value_flow:                           v["value"]["flow"],
+			value_turnover:                       v["value"]["turnover"],
 			value_percent:                        v["value"]["normal"] / value_total,
 			value_change_since_base_period:       v["value"]["normal"] - new_statement_map_base[key]["value"]["normal"],
 			value_growth_ratio_to_base_period:    v["value"]["normal"] / new_statement_map_base[key]["value"]["normal"],
@@ -1041,6 +942,7 @@ func (s Financial_accounting) prepare_statement(statement_map, statement_map_bas
 			price_inflow:                         v["price"]["inflow"],
 			price_outflow:                        v["price"]["outflow"],
 			price_flow:                           v["price"]["flow"],
+			price_turnover:                       v["price"]["turnover"],
 			price_percent:                        v["price"]["normal"] / price_total,
 			price_change_since_base_period:       v["price"]["normal"] - new_statement_map_base[key]["price"]["normal"],
 			price_growth_ratio_to_base_period:    v["price"]["normal"] / new_statement_map_base[key]["price"]["normal"],
@@ -1052,6 +954,7 @@ func (s Financial_accounting) prepare_statement(statement_map, statement_map_bas
 			quantity_inflow:                      v["quantity"]["inflow"],
 			quantity_outflow:                     v["quantity"]["outflow"],
 			quantity_flow:                        v["quantity"]["flow"],
+			quantity_turnover:                    v["quantity"]["turnover"],
 			quantity_percent:                     v["quantity"]["normal"] / quantity_total,
 			quantity_change_since_base_period:    v["quantity"]["normal"] - new_statement_map_base[key]["quantity"]["normal"],
 			quantity_growth_ratio_to_base_period: v["quantity"]["normal"] / new_statement_map_base[key]["quantity"]["normal"],
@@ -1068,6 +971,7 @@ func (s Financial_accounting) prepare_statement(statement_map, statement_map_bas
 			(statement_sheet[index].value_inflow == 0 || math.IsNaN(statement_sheet[index].value_inflow)) &&
 			(statement_sheet[index].value_outflow == 0 || math.IsNaN(statement_sheet[index].value_outflow)) &&
 			(statement_sheet[index].value_flow == 0 || math.IsNaN(statement_sheet[index].value_flow)) &&
+			(statement_sheet[index].value_turnover == 0 || math.IsNaN(statement_sheet[index].value_flow)) &&
 			(statement_sheet[index].value_percent == 0 || math.IsNaN(statement_sheet[index].value_percent)) &&
 			(statement_sheet[index].value_change_since_base_period == 0 || math.IsNaN(statement_sheet[index].value_change_since_base_period)) &&
 			(statement_sheet[index].value_growth_ratio_to_base_period == 0 || math.IsNaN(statement_sheet[index].value_growth_ratio_to_base_period)) &&
@@ -1079,6 +983,7 @@ func (s Financial_accounting) prepare_statement(statement_map, statement_map_bas
 			(statement_sheet[index].price_inflow == 0 || math.IsNaN(statement_sheet[index].price_inflow)) &&
 			(statement_sheet[index].price_outflow == 0 || math.IsNaN(statement_sheet[index].price_outflow)) &&
 			(statement_sheet[index].price_flow == 0 || math.IsNaN(statement_sheet[index].price_flow)) &&
+			(statement_sheet[index].price_turnover == 0 || math.IsNaN(statement_sheet[index].price_flow)) &&
 			(statement_sheet[index].price_percent == 0 || math.IsNaN(statement_sheet[index].price_percent)) &&
 			(statement_sheet[index].price_change_since_base_period == 0 || math.IsNaN(statement_sheet[index].price_change_since_base_period)) &&
 			(statement_sheet[index].price_growth_ratio_to_base_period == 0 || math.IsNaN(statement_sheet[index].price_growth_ratio_to_base_period)) &&
@@ -1090,6 +995,7 @@ func (s Financial_accounting) prepare_statement(statement_map, statement_map_bas
 			(statement_sheet[index].quantity_inflow == 0 || math.IsNaN(statement_sheet[index].quantity_inflow)) &&
 			(statement_sheet[index].quantity_outflow == 0 || math.IsNaN(statement_sheet[index].quantity_outflow)) &&
 			(statement_sheet[index].quantity_flow == 0 || math.IsNaN(statement_sheet[index].quantity_flow)) &&
+			(statement_sheet[index].quantity_turnover == 0 || math.IsNaN(statement_sheet[index].quantity_flow)) &&
 			(statement_sheet[index].quantity_percent == 0 || math.IsNaN(statement_sheet[index].quantity_percent)) &&
 			(statement_sheet[index].quantity_change_since_base_period == 0 || math.IsNaN(statement_sheet[index].quantity_change_since_base_period)) &&
 			(statement_sheet[index].quantity_growth_ratio_to_base_period == 0 || math.IsNaN(statement_sheet[index].quantity_growth_ratio_to_base_period)) {
@@ -1108,7 +1014,7 @@ func (s Financial_accounting) prepare_statement(statement_map, statement_map_bas
 			}
 		}
 	}
-	return statement_sheet
+	return statement_sheet, analysis
 }
 
 func (s Financial_accounting) parse_date(string_date string) time.Time {
@@ -1166,7 +1072,19 @@ func sum_and_extract_new_map(statement_map map[string]map[string]map[string]map[
 	for keya, a := range statement_map {
 		if is_in(keya, flow_account) {
 			for keyb, b := range a {
-				for keyc, _ := range b {
+				if new_statement_map[keyb] == nil {
+					new_statement_map[keyb] = map[string]map[string]float64{}
+				}
+				if new_statement_map[keyb]["value"] == nil {
+					new_statement_map[keyb]["value"] = map[string]float64{}
+				}
+				if new_statement_map[keyb]["price"] == nil {
+					new_statement_map[keyb]["price"] = map[string]float64{}
+				}
+				if new_statement_map[keyb]["quantity"] == nil {
+					new_statement_map[keyb]["quantity"] = map[string]float64{}
+				}
+				for keyc, c := range b {
 					var ok bool
 					if len(name) == 0 {
 						ok = true
@@ -1174,48 +1092,38 @@ func sum_and_extract_new_map(statement_map map[string]map[string]map[string]map[
 						ok = true
 					}
 					if ok {
-						if new_statement_map[keyb] == nil {
-							new_statement_map[keyb] = map[string]map[string]float64{}
-						}
-						if new_statement_map[keyb]["value"] == nil {
-							new_statement_map[keyb]["value"] = map[string]float64{}
-						}
-						if new_statement_map[keyb]["price"] == nil {
-							new_statement_map[keyb]["price"] = map[string]float64{}
-						}
-						if new_statement_map[keyb]["quantity"] == nil {
-							new_statement_map[keyb]["quantity"] = map[string]float64{}
-						}
-						v_account := keyb
-						new_statement_map[v_account]["value"]["normal"] += b[keyc]["value"]["normal"]
-						new_statement_map[v_account]["value"]["average"] += b[keyc]["value"]["average"]
-						new_statement_map[v_account]["value"]["increase"] += b[keyc]["value"]["increase"]
-						new_statement_map[v_account]["value"]["decrease"] += b[keyc]["value"]["decrease"]
-						new_statement_map[v_account]["value"]["increase_or_decrease"] += b[keyc]["value"]["increase_or_decrease"]
-						new_statement_map[v_account]["value"]["inflow"] += b[keyc]["value"]["inflow"]
-						new_statement_map[v_account]["value"]["outflow"] += b[keyc]["value"]["outflow"]
-						new_statement_map[v_account]["value"]["flow"] += b[keyc]["value"]["flow"]
+						new_statement_map[keyb]["value"]["normal"] += c["value"]["normal"]
+						new_statement_map[keyb]["value"]["average"] += c["value"]["average"]
+						new_statement_map[keyb]["value"]["increase"] += c["value"]["increase"]
+						new_statement_map[keyb]["value"]["decrease"] += c["value"]["decrease"]
+						new_statement_map[keyb]["value"]["increase_or_decrease"] += c["value"]["increase_or_decrease"]
+						new_statement_map[keyb]["value"]["inflow"] += c["value"]["inflow"]
+						new_statement_map[keyb]["value"]["outflow"] += c["value"]["outflow"]
+						new_statement_map[keyb]["value"]["flow"] += c["value"]["flow"]
 
-						new_statement_map[v_account]["price"]["normal"] += b[keyc]["price"]["normal"]
-						new_statement_map[v_account]["price"]["average"] += b[keyc]["price"]["average"]
-						new_statement_map[v_account]["price"]["increase"] += b[keyc]["price"]["increase"]
-						new_statement_map[v_account]["price"]["decrease"] += b[keyc]["price"]["decrease"]
-						new_statement_map[v_account]["price"]["increase_or_decrease"] += b[keyc]["price"]["increase_or_decrease"]
-						new_statement_map[v_account]["price"]["inflow"] += b[keyc]["price"]["inflow"]
-						new_statement_map[v_account]["price"]["outflow"] += b[keyc]["price"]["outflow"]
-						new_statement_map[v_account]["price"]["flow"] += b[keyc]["price"]["flow"]
-
-						new_statement_map[v_account]["quantity"]["normal"] += b[keyc]["quantity"]["normal"]
-						new_statement_map[v_account]["quantity"]["average"] += b[keyc]["quantity"]["average"]
-						new_statement_map[v_account]["quantity"]["increase"] += b[keyc]["quantity"]["increase"]
-						new_statement_map[v_account]["quantity"]["decrease"] += b[keyc]["quantity"]["decrease"]
-						new_statement_map[v_account]["quantity"]["increase_or_decrease"] += b[keyc]["quantity"]["increase_or_decrease"]
-						new_statement_map[v_account]["quantity"]["inflow"] += b[keyc]["quantity"]["inflow"]
-						new_statement_map[v_account]["quantity"]["outflow"] += b[keyc]["quantity"]["outflow"]
-						new_statement_map[v_account]["quantity"]["flow"] += b[keyc]["quantity"]["flow"]
-
+						new_statement_map[keyb]["quantity"]["normal"] += c["quantity"]["normal"]
+						new_statement_map[keyb]["quantity"]["average"] += c["quantity"]["average"]
+						new_statement_map[keyb]["quantity"]["increase"] += c["quantity"]["increase"]
+						new_statement_map[keyb]["quantity"]["decrease"] += c["quantity"]["decrease"]
+						new_statement_map[keyb]["quantity"]["increase_or_decrease"] += c["quantity"]["increase_or_decrease"]
+						new_statement_map[keyb]["quantity"]["inflow"] += c["quantity"]["inflow"]
+						new_statement_map[keyb]["quantity"]["outflow"] += c["quantity"]["outflow"]
+						new_statement_map[keyb]["quantity"]["flow"] += c["quantity"]["flow"]
 					}
 				}
+				new_statement_map[keyb]["price"]["normal"] = new_statement_map[keyb]["value"]["normal"] / new_statement_map[keyb]["quantity"]["normal"]
+				new_statement_map[keyb]["price"]["average"] = new_statement_map[keyb]["value"]["average"] / new_statement_map[keyb]["quantity"]["average"]
+				new_statement_map[keyb]["price"]["increase"] = new_statement_map[keyb]["value"]["increase"] / new_statement_map[keyb]["quantity"]["increase"]
+				new_statement_map[keyb]["price"]["decrease"] = new_statement_map[keyb]["value"]["decrease"] / new_statement_map[keyb]["quantity"]["decrease"]
+				new_statement_map[keyb]["price"]["increase_or_decrease"] = new_statement_map[keyb]["value"]["increase_or_decrease"] / new_statement_map[keyb]["quantity"]["increase_or_decrease"]
+				new_statement_map[keyb]["price"]["inflow"] = new_statement_map[keyb]["value"]["inflow"] / new_statement_map[keyb]["quantity"]["inflow"]
+				new_statement_map[keyb]["price"]["outflow"] = new_statement_map[keyb]["value"]["outflow"] / new_statement_map[keyb]["quantity"]["outflow"]
+				new_statement_map[keyb]["price"]["flow"] = new_statement_map[keyb]["value"]["flow"] / new_statement_map[keyb]["quantity"]["flow"]
+
+				new_statement_map[keyb]["value"]["turnover"] = new_statement_map[keyb]["value"]["inflow"] / new_statement_map[keyb]["value"]["average"]
+				new_statement_map[keyb]["price"]["turnover"] = new_statement_map[keyb]["price"]["inflow"] / new_statement_map[keyb]["price"]["average"]
+				new_statement_map[keyb]["quantity"]["turnover"] = new_statement_map[keyb]["quantity"]["inflow"] / new_statement_map[keyb]["quantity"]["average"]
+
 			}
 		}
 	}
@@ -1667,41 +1575,51 @@ func main() {
 	// 	fmt.Fprintln(r, "\t", i.date, "\t", i.entry_number, "\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.barcode, "\t", i.entry_expair, "\t", i.description, "\t", i.name, "\t", i.employee_name, "\t", i.entry_date, "\t", i.reverse)
 	// }
 	// r.Flush()
-	balance_sheet, _, _ := v.financial_statements(
+	balance_sheet, _, _, _ := v.financial_statements(
 		time.Date(2021, time.January, 1, 0, 0, 0, 0, time.Local),
 		time.Date(2022, time.January, 1, 0, 0, 0, 0, time.Local),
 		2, []string{})
 	w := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
 	fmt.Fprintln(w, "index\t", "account\t",
 		"value_normal\t", "value_average\t", "value_increase\t", "value_decrease\t", "value_increase_or_decrease\t", "value_inflow\t",
-		"value_outflow\t", "value_flow\t", "value_percent\t", "value_change_since_base_period\t", "value_growth_ratio_to_base_period\t",
+		"value_outflow\t", "value_flow\t", "value_turnover\t", "value_percent\t", "value_change_since_base_period\t", "value_growth_ratio_to_base_period\t",
 		"price_normal\t", "price_average\t", "price_increase\t", "price_decrease\t", "price_increase_or_decrease\t", "price_inflow\t",
-		"price_outflow\t", "price_flow\t", "price_percent\t", "price_change_since_base_period\t", "price_growth_ratio_to_base_period\t",
+		"price_outflow\t", "price_flow\t", "price_turnover\t", "price_percent\t", "price_change_since_base_period\t", "price_growth_ratio_to_base_period\t",
 		"quantity_normal\t", "quantity_average\t", "quantity_increase\t", "quantity_decrease\t", "quantity_increase_or_decrease\t", "quantity_inflow\t",
-		"quantity_outflow\t", "quantity_flow\t", "quantity_percent\t", "quantity_change_since_base_period\t", "quantity_growth_ratio_to_base_period\t")
+		"quantity_outflow\t", "quantity_flow\t", "quantity_turnover\t", "quantity_percent\t", "quantity_change_since_base_period\t", "quantity_growth_ratio_to_base_period\t")
 	for index, a := range balance_sheet {
 		for _, b := range a {
 			fmt.Fprintln(w, index, "\t", b.account, "\t",
 				b.value_normal, "\t", b.value_average, "\t", b.value_increase, "\t", b.value_decrease, "\t", b.value_increase_or_decrease, "\t", b.value_inflow, "\t",
-				b.value_outflow, "\t", b.value_flow, "\t", b.value_percent, "\t", b.value_change_since_base_period, "\t", b.value_growth_ratio_to_base_period, "\t",
+				b.value_outflow, "\t", b.value_flow, "\t", b.value_turnover, "\t", b.value_percent, "\t", b.value_change_since_base_period, "\t", b.value_growth_ratio_to_base_period, "\t",
 				b.price_normal, "\t", b.price_average, "\t", b.price_increase, "\t", b.price_decrease, "\t", b.price_increase_or_decrease, "\t", b.price_inflow, "\t",
-				b.price_outflow, "\t", b.price_flow, "\t", b.price_percent, "\t", b.price_change_since_base_period, "\t", b.price_growth_ratio_to_base_period, "\t",
+				b.price_outflow, "\t", b.price_flow, "\t", b.price_turnover, "\t", b.price_percent, "\t", b.price_change_since_base_period, "\t", b.price_growth_ratio_to_base_period, "\t",
 				b.quantity_normal, "\t", b.quantity_average, "\t", b.quantity_increase, "\t", b.quantity_decrease, "\t", b.quantity_increase_or_decrease, "\t", b.quantity_inflow, "\t",
-				b.quantity_outflow, "\t", b.quantity_flow, "\t", b.quantity_percent, "\t", b.quantity_change_since_base_period, "\t", b.quantity_growth_ratio_to_base_period, "\t")
+				b.quantity_outflow, "\t", b.quantity_flow, "\t", b.quantity_turnover, "\t", b.quantity_percent, "\t", b.quantity_change_since_base_period, "\t", b.quantity_growth_ratio_to_base_period, "\t")
 		}
 	}
 	w.Flush()
+
+	// t := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
+	// fmt.Fprintln(t, "date\t", "entry_number\t", "account\t", "value\t", "price\t", "quantity\t", "barcode\t", "entry_expair\t", "description\t", "name\t", "employee_name\t", "entry_date\t", "reverse")
+	// for _, a := range journal_tag {
+	// 	fmt.Fprintln(t, a.date, "\t", a.entry_number, "\t", a.account, "\t", a.value, "\t", a.price, "\t", a.quantity, "\t", a.barcode, "\t", a.entry_expair, "\t", a.description, "\t", a.name, "\t", a.employee_name, "\t", a.entry_date, "\t", a.reverse, "\t")
+	// }
+	// t.Flush()
+
 	// for _, a := range financial_analysis_statement {
 	// 	fmt.Println(a)
 	// }
+
 	// r := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
 	// for _, v := range all_flows_for_all {
+	// 	fmt.Fprintln(r, "/////////////////////////////////////////////////////////////////////////////////////////////")
 	// 	for keya, a := range v {
 	// 		for keyb, b := range a {
 	// 			for keyc, c := range b {
 	// 				for keyd, d := range c {
 	// 					for keye, e := range d {
-	// 						if keya == "cash" && keyd == "price" {
+	// 						if keya == "cash" && keyd == "value" {
 	// 							fmt.Fprintln(r, keya, "\t", keyb, "\t", keyc, "\t", keyd, "\t", keye, "\t", e)
 	// 						}
 	// 					}
