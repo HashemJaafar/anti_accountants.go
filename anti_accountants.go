@@ -58,14 +58,22 @@ type Financial_accounting struct {
 	assets                                    string
 	current_assets                            string
 	cash_and_cash_equivalents                 string
+	short_term_investments                    string
+	receivables                               string
+	inventory                                 string
 	liabilities                               string
 	current_liabilities                       string
 	equity                                    string
 	retained_earnings                         string
+	dividends                                 string
+	preferred_dividends                       string
 	income_statement                          string
+	ebitda                                    string
 	sales                                     string
+	cost_of_goods_sold                        string
 	discounts                                 string
 	invoice_discount                          string
+	interest_expense                          string
 	accounts                                  []account
 	Invoice_discounts_list                    [][2]float64
 	auto_complete_entries                     [][]account_method_value_price
@@ -99,7 +107,7 @@ type statement struct {
 
 type financial_analysis struct {
 	current_assets, current_liabilities, cash, short_term_investments, net_receivables, net_credit_sales,
-	average_net_receivables, cost_of_goods_sold, average_inventory, net_income, net_sales, average_assets,
+	average_net_receivables, cost_of_goods_sold, average_inventory, net_income, net_sales, average_assets, average_equity,
 	preferred_dividends, average_common_stockholders_equity, market_price_per_shares_outstanding, cash_dividends,
 	total_debt, total_assets, ebitda, interest_expense, weighted_average_common_shares_outstanding float64
 }
@@ -112,12 +120,13 @@ type financial_analysis_statement struct {
 	profit_margin                        float64 // net_income / net_sales
 	asset_turnover                       float64 // net_sales / average_assets
 	return_on_assets                     float64 // net_income / average_assets
-	return_on_common_stockholders_equity float64 // (net_income - preferred_dividends) / average_common_stockholders_equity
-	earnings_per_share                   float64 // (net_income - preferred_dividends) / weighted_average_common_shares_outstanding
-	price_earnings_ratio                 float64 // market_price_per_shares_outstanding / earnings_per_share
+	return_on_equity                     float64 // net_income / average_equity
 	payout_ratio                         float64 // cash_dividends / net_income
 	debt_to_total_assets_ratio           float64 // total_debt / total_assets
 	times_interest_earned                float64 // ebitda / interest_expense
+	return_on_common_stockholders_equity float64 // (net_income - preferred_dividends) / average_common_stockholders_equity
+	earnings_per_share                   float64 // (net_income - preferred_dividends) / weighted_average_common_shares_outstanding
+	price_earnings_ratio                 float64 // market_price_per_shares_outstanding / earnings_per_share
 }
 
 type cvp_statistics struct {
@@ -207,16 +216,32 @@ func (s Financial_accounting) initialize() {
 		log.Panic(s.assets, " should be one of the fathers of ", s.current_assets)
 	case !s.is_father(s.current_assets, s.cash_and_cash_equivalents):
 		log.Panic(s.current_assets, " should be one of the fathers of ", s.cash_and_cash_equivalents)
+	case !s.is_father(s.current_assets, s.short_term_investments):
+		log.Panic(s.current_assets, " should be one of the fathers of ", s.short_term_investments)
+	case !s.is_father(s.current_assets, s.receivables):
+		log.Panic(s.current_assets, " should be one of the fathers of ", s.receivables)
+	case !s.is_father(s.current_assets, s.inventory):
+		log.Panic(s.current_assets, " should be one of the fathers of ", s.inventory)
 	case !s.is_father(s.liabilities, s.current_liabilities):
 		log.Panic(s.liabilities, " should be one of the fathers of ", s.current_liabilities)
 	case !s.is_father(s.equity, s.retained_earnings):
 		log.Panic(s.equity, " should be one of the fathers of ", s.retained_earnings)
+	case !s.is_father(s.retained_earnings, s.dividends):
+		log.Panic(s.retained_earnings, " should be one of the fathers of ", s.dividends)
+	case !s.is_father(s.dividends, s.preferred_dividends):
+		log.Panic(s.dividends, " should be one of the fathers of ", s.preferred_dividends)
 	case !s.is_father(s.retained_earnings, s.income_statement):
 		log.Panic(s.retained_earnings, " should be one of the fathers of ", s.income_statement)
-	case !s.is_father(s.income_statement, s.sales):
-		log.Panic(s.income_statement, " should be one of the fathers of ", s.sales)
-	case !s.is_father(s.income_statement, s.discounts):
-		log.Panic(s.income_statement, " should be one of the fathers of ", s.discounts)
+	case !s.is_father(s.income_statement, s.ebitda):
+		log.Panic(s.income_statement, " should be one of the fathers of ", s.ebitda)
+	case !s.is_father(s.income_statement, s.interest_expense):
+		log.Panic(s.income_statement, " should be one of the fathers of ", s.interest_expense)
+	case !s.is_father(s.ebitda, s.sales):
+		log.Panic(s.ebitda, " should be one of the fathers of ", s.sales)
+	case !s.is_father(s.ebitda, s.cost_of_goods_sold):
+		log.Panic(s.ebitda, " should be one of the fathers of ", s.cost_of_goods_sold)
+	case !s.is_father(s.ebitda, s.discounts):
+		log.Panic(s.ebitda, " should be one of the fathers of ", s.discounts)
 	case !s.is_father(s.discounts, s.invoice_discount):
 		log.Panic(s.discounts, " should be one of the fathers of ", s.invoice_discount)
 	}
@@ -491,7 +516,8 @@ func (s Financial_accounting) journal_entry(array_of_entry []Account_value_quant
 	return array_to_insert
 }
 
-func (s Financial_accounting) financial_statements(start_date, end_date time.Time, periods int, flow_account, names []string) ([][]statement, []financial_analysis_statement, []map[string]map[string]map[string]map[string]map[string]float64, []journal_tag) {
+func (s Financial_accounting) financial_statements(start_date, end_date time.Time, periods int, names []string, average_common_stockholders_equity, market_price_per_shares_outstanding,
+	weighted_average_common_shares_outstanding float64) ([][]statement, []financial_analysis_statement, []map[string]map[string]map[string]map[string]map[string]float64, []journal_tag) {
 	check_dates(start_date, end_date)
 	d1 := int(end_date.Sub(start_date).Hours() / 24)
 	var journal []journal_tag
@@ -503,14 +529,12 @@ func (s Financial_accounting) financial_statements(start_date, end_date time.Tim
 	}
 	all_values_for_all := []map[string]map[string]map[string]map[string]map[string]float64{}
 	for a := 0; a < periods; a++ {
-		start_date_to_enter := start_date.AddDate(0, 0, -d1*a)
-		end_date_to_enter := end_date.AddDate(0, 0, -d1*a)
-		all_values_for_all = append(all_values_for_all, s.all_values(journal, start_date_to_enter, end_date_to_enter))
+		all_values_for_all = append(all_values_for_all, s.all_values(journal, start_date.AddDate(0, 0, -d1*a), end_date.AddDate(0, 0, -d1*a)))
 	}
 	var all_analysis []financial_analysis_statement
 	var statements [][]statement
 	for _, a := range all_values_for_all {
-		statement, analysis := s.prepare_statement(a, all_values_for_all[periods-1], flow_account, names)
+		statement, analysis := s.prepare_statement(a, all_values_for_all[periods-1], names, average_common_stockholders_equity, market_price_per_shares_outstanding, weighted_average_common_shares_outstanding)
 		statements = append(statements, statement)
 		all_analysis = append(all_analysis, analysis)
 	}
@@ -713,24 +737,23 @@ func (s Financial_accounting) all_values(journal []journal_tag, start_date, end_
 	for _, a := range new_all_values {
 		for _, b := range a {
 			for _, c := range b {
+				if c["value"] == nil {
+					c["value"] = map[string]float64{}
+				}
+				if c["price"] == nil {
+					c["price"] = map[string]float64{}
+				}
+				if c["quantity"] == nil {
+					c["quantity"] = map[string]float64{}
+				}
 				for _, d := range c {
 					for keye, _ := range d {
-						if c["value"] == nil {
-							c["value"] = map[string]float64{}
-						}
-						if c["price"] == nil {
-							c["price"] = map[string]float64{}
-						}
-						if c["quantity"] == nil {
-							c["quantity"] = map[string]float64{}
-						}
 						c["price"][keye] = c["value"][keye] / c["quantity"][keye]
-						c["value"]["turnover"] = c["value"]["inflow"] / c["value"]["average"]
-						c["price"]["turnover"] = c["price"]["inflow"] / c["price"]["average"]
-						c["quantity"]["turnover"] = c["quantity"]["inflow"] / c["quantity"]["average"]
-
 					}
 				}
+				c["value"]["turnover"] = c["value"]["inflow"] / c["value"]["average"]
+				c["price"]["turnover"] = c["price"]["inflow"] / c["price"]["average"]
+				c["quantity"]["turnover"] = c["quantity"]["inflow"] / c["quantity"]["average"]
 			}
 		}
 	}
@@ -810,47 +833,54 @@ func (s Financial_accounting) sum_values(date, start_date time.Time, one_compoun
 	}
 }
 
-func (s Financial_accounting) prepare_statement(statement_map, statement_map_base map[string]map[string]map[string]map[string]map[string]float64, flow_account, names []string) ([]statement, financial_analysis_statement) {
-	new_statement_map := sum_and_extract_new_map(statement_map, flow_account, names)
-	new_statement_map_base := sum_and_extract_new_map(statement_map_base, flow_account, names)
+func (s Financial_accounting) prepare_statement(statement_map, statement_map_base map[string]map[string]map[string]map[string]map[string]float64,
+	names []string, average_common_stockholders_equity, market_price_per_shares_outstanding, weighted_average_common_shares_outstanding float64) ([]statement, financial_analysis_statement) {
+	var cash_and_cash_equivalents, sales []string
+	for _, a := range s.accounts {
+		if s.is_father(s.cash_and_cash_equivalents, a.name) {
+			cash_and_cash_equivalents = append(cash_and_cash_equivalents, a.name)
+		}
+		if s.is_father(s.sales, a.name) {
+			sales = append(sales, a.name)
+		}
+	}
+	new_statement_map := sum_and_extract_new_map(statement_map, cash_and_cash_equivalents, names)
+	new_statement_map_base := sum_and_extract_new_map(statement_map_base, cash_and_cash_equivalents, names)
+	new_statement_map_sales := sum_and_extract_new_map(statement_map, sales, names)
 
 	analysis := financial_analysis{
-		current_assets:                      0,
-		current_liabilities:                 0,
-		cash:                                0,
-		short_term_investments:              0,
-		net_receivables:                     0,
-		net_credit_sales:                    0,
-		average_net_receivables:             0,
-		cost_of_goods_sold:                  0,
-		average_inventory:                   0,
-		net_income:                          0,
-		net_sales:                           0,
-		average_assets:                      0,
-		preferred_dividends:                 0,
-		average_common_stockholders_equity:  0,
-		market_price_per_shares_outstanding: 0,
-		cash_dividends:                      0,
-		total_debt:                          0,
-		total_assets:                        0,
-		ebitda:                              0,
-		interest_expense:                    0,
-		weighted_average_common_shares_outstanding: 0,
+		current_assets:                      new_statement_map[s.current_assets]["value"]["normal"],
+		current_liabilities:                 new_statement_map[s.current_liabilities]["value"]["normal"],
+		cash:                                new_statement_map[s.cash_and_cash_equivalents]["value"]["normal"],
+		short_term_investments:              new_statement_map[s.short_term_investments]["value"]["normal"],
+		net_receivables:                     new_statement_map[s.receivables]["value"]["normal"],
+		net_credit_sales:                    new_statement_map_sales[s.receivables]["value"]["flow"],
+		average_net_receivables:             new_statement_map[s.receivables]["value"]["average"],
+		cost_of_goods_sold:                  new_statement_map[s.cost_of_goods_sold]["value"]["normal"],
+		average_inventory:                   new_statement_map[s.inventory]["value"]["average"],
+		net_income:                          new_statement_map[s.income_statement]["value"]["normal"],
+		net_sales:                           new_statement_map[s.sales]["value"]["normal"],
+		average_assets:                      new_statement_map[s.assets]["value"]["average"],
+		average_equity:                      new_statement_map[s.equity]["value"]["average"],
+		preferred_dividends:                 new_statement_map[s.preferred_dividends]["value"]["normal"],
+		average_common_stockholders_equity:  average_common_stockholders_equity,
+		market_price_per_shares_outstanding: market_price_per_shares_outstanding,
+		cash_dividends:                      new_statement_map[s.dividends]["value"]["flow"],
+		total_debt:                          new_statement_map[s.liabilities]["value"]["normal"],
+		total_assets:                        new_statement_map[s.assets]["value"]["normal"],
+		ebitda:                              new_statement_map[s.ebitda]["value"]["normal"],
+		interest_expense:                    new_statement_map[s.interest_expense]["value"]["normal"],
+		weighted_average_common_shares_outstanding: weighted_average_common_shares_outstanding,
 	}.financial_analysis_statement()
 
 	value_total_assets := new_statement_map[s.assets]["value"]["normal"]
 	price_total_assets := new_statement_map[s.assets]["price"]["normal"]
 	quantity_total_assets := new_statement_map[s.assets]["quantity"]["normal"]
-	var value_total_sales, price_total_sales, quantity_total_sales,
-		value_total, price_total, quantity_total float64
-	for key, v := range new_statement_map {
-		if s.is_father(s.sales, key) && s.is_credit(key) {
-			value_total_sales += v["value"]["normal"]
-			price_total_sales += v["price"]["normal"]
-			quantity_total_sales += v["quantity"]["normal"]
-		}
-	}
+	value_total_sales := new_statement_map[s.sales]["value"]["normal"]
+	price_total_sales := new_statement_map[s.sales]["price"]["normal"]
+	quantity_total_sales := new_statement_map[s.sales]["quantity"]["normal"]
 
+	var value_total, price_total, quantity_total float64
 	var statement_sheet []statement
 	for key, v := range new_statement_map {
 		if !s.is_father(s.income_statement, key) {
@@ -872,7 +902,7 @@ func (s Financial_accounting) prepare_statement(statement_map, statement_map_bas
 			value_inflow:                         v["value"]["inflow"],
 			value_outflow:                        v["value"]["outflow"],
 			value_flow:                           v["value"]["flow"],
-			value_turnover:                       v["value"]["turnover"],
+			value_turnover:                       v["value"]["decrease"] / v["value"]["average"],
 			value_percent:                        v["value"]["normal"] / value_total,
 			value_change_since_base_period:       v["value"]["normal"] - new_statement_map_base[key]["value"]["normal"],
 			value_growth_ratio_to_base_period:    v["value"]["normal"] / new_statement_map_base[key]["value"]["normal"],
@@ -884,7 +914,7 @@ func (s Financial_accounting) prepare_statement(statement_map, statement_map_bas
 			price_inflow:                         v["price"]["inflow"],
 			price_outflow:                        v["price"]["outflow"],
 			price_flow:                           v["price"]["flow"],
-			price_turnover:                       v["price"]["turnover"],
+			price_turnover:                       v["price"]["decrease"] / v["price"]["average"],
 			price_percent:                        v["price"]["normal"] / price_total,
 			price_change_since_base_period:       v["price"]["normal"] - new_statement_map_base[key]["price"]["normal"],
 			price_growth_ratio_to_base_period:    v["price"]["normal"] / new_statement_map_base[key]["price"]["normal"],
@@ -896,7 +926,7 @@ func (s Financial_accounting) prepare_statement(statement_map, statement_map_bas
 			quantity_inflow:                      v["quantity"]["inflow"],
 			quantity_outflow:                     v["quantity"]["outflow"],
 			quantity_flow:                        v["quantity"]["flow"],
-			quantity_turnover:                    v["quantity"]["turnover"],
+			quantity_turnover:                    v["quantity"]["decrease"] / v["quantity"]["average"],
 			quantity_percent:                     v["quantity"]["normal"] / quantity_total,
 			quantity_change_since_base_period:    v["quantity"]["normal"] - new_statement_map_base[key]["quantity"]["normal"],
 			quantity_growth_ratio_to_base_period: v["quantity"]["normal"] / new_statement_map_base[key]["quantity"]["normal"],
@@ -1104,7 +1134,6 @@ func sum_and_extract_new_map(statement_map map[string]map[string]map[string]map[
 				new_statement_map[keyb]["value"]["turnover"] = new_statement_map[keyb]["value"]["inflow"] / new_statement_map[keyb]["value"]["average"]
 				new_statement_map[keyb]["price"]["turnover"] = new_statement_map[keyb]["price"]["inflow"] / new_statement_map[keyb]["price"]["average"]
 				new_statement_map[keyb]["quantity"]["turnover"] = new_statement_map[keyb]["quantity"]["inflow"] / new_statement_map[keyb]["quantity"]["average"]
-
 			}
 		}
 	}
@@ -1284,12 +1313,13 @@ func (s financial_analysis) financial_analysis_statement() financial_analysis_st
 	profit_margin := s.net_income / s.net_sales
 	asset_turnover := s.net_sales / s.average_assets
 	return_on_assets := s.net_income / s.average_assets
-	return_on_common_stockholders_equity := (s.net_income - s.preferred_dividends) / s.average_common_stockholders_equity
-	earnings_per_share := (s.net_income - s.preferred_dividends) / s.weighted_average_common_shares_outstanding
-	price_earnings_ratio := s.market_price_per_shares_outstanding / earnings_per_share
+	return_on_equity := s.net_income / s.average_equity
 	payout_ratio := s.cash_dividends / s.net_income
 	debt_to_total_assets_ratio := s.total_debt / s.total_assets
 	times_interest_earned := s.ebitda / s.interest_expense
+	return_on_common_stockholders_equity := (s.net_income - s.preferred_dividends) / s.average_common_stockholders_equity
+	earnings_per_share := (s.net_income - s.preferred_dividends) / s.weighted_average_common_shares_outstanding
+	price_earnings_ratio := s.market_price_per_shares_outstanding / earnings_per_share
 	return financial_analysis_statement{
 		current_ratio:                        current_ratio,
 		acid_test:                            acid_test,
@@ -1298,12 +1328,13 @@ func (s financial_analysis) financial_analysis_statement() financial_analysis_st
 		profit_margin:                        profit_margin,
 		asset_turnover:                       asset_turnover,
 		return_on_assets:                     return_on_assets,
-		return_on_common_stockholders_equity: return_on_common_stockholders_equity,
-		earnings_per_share:                   earnings_per_share,
-		price_earnings_ratio:                 price_earnings_ratio,
+		return_on_equity:                     return_on_equity,
 		payout_ratio:                         payout_ratio,
 		debt_to_total_assets_ratio:           debt_to_total_assets_ratio,
 		times_interest_earned:                times_interest_earned,
+		return_on_common_stockholders_equity: return_on_common_stockholders_equity,
+		earnings_per_share:                   earnings_per_share,
+		price_earnings_ratio:                 price_earnings_ratio,
 	}
 }
 
@@ -1486,41 +1517,56 @@ func main() {
 		assets:                    "assets",
 		current_assets:            "current_assets",
 		cash_and_cash_equivalents: "cash_and_cash_equivalents",
+		short_term_investments:    "short_term_investments",
+		receivables:               "receivables",
+		inventory:                 "inventory",
 		liabilities:               "liabilities",
 		current_liabilities:       "current_liabilities",
 		equity:                    "equity",
 		retained_earnings:         "retained_earnings",
+		dividends:                 "dividends",
+		preferred_dividends:       "preferred_dividends",
 		income_statement:          "income_statement",
+		ebitda:                    "ebitda",
 		sales:                     "sales",
+		cost_of_goods_sold:        "cost_of_goods_sold",
 		discounts:                 "discounts",
 		invoice_discount:          "invoice_discount",
+		interest_expense:          "interest_expense",
 		accounts: []account{
 			{false, "wma", "", "assets"},
 			{false, "wma", "assets", "current_assets"},
 			{false, "wma", "current_assets", "cash_and_cash_equivalents"},
 			{false, "wma", "cash_and_cash_equivalents", "cash"},
-			{false, "wma", "assets", "inventory"},
+			{false, "wma", "current_assets", "short_term_investments"},
+			{false, "", "current_assets", "receivables"},
+			{false, "wma", "current_assets", "inventory"},
 			{false, "wma", "inventory", "book"},
 			{true, "", "", "liabilities"},
 			{true, "", "liabilities", "current_liabilities"},
 			{true, "", "current_liabilities", "tax"},
 			{true, "", "", "equity"},
 			{true, "", "equity", "retained_earnings"},
+			{true, "", "retained_earnings", "dividends"},
+			{true, "", "dividends", "preferred_dividends"},
 			{true, "", "retained_earnings", "income_statement"},
 			{true, "", "income_statement", "Revenues"},
-			{true, "", "Revenues", "sales"},
+			{true, "", "income_statement", "ebitda"},
+			{true, "", "ebitda", "sales"},
 			{true, "", "sales", "service revenue"},
 			{true, "", "sales", "revenue of book"},
-			{false, "", "income_statement", "Expenses"},
-			{false, "", "Expenses", "expair_expenses"},
-			{false, "", "Expenses", "cost of book"},
-			{false, "", "Expenses", "tax of book"},
-			{false, "", "Expenses", "tax of service revenue"},
-			{false, "", "Expenses", "invoice_tax"},
-			{false, "", "Expenses", "discounts"},
+			{false, "", "ebitda", "expair_expenses"},
+			{false, "", "ebitda", "cost_of_goods_sold"},
+			{false, "", "cost_of_goods_sold", "cost of book"},
+			{false, "", "ebitda", "discounts"},
 			{false, "", "discounts", "discount of book"},
 			{false, "", "discounts", "invoice_discount"},
-			{false, "", "discounts", "service_discount"}},
+			{false, "", "discounts", "service_discount"},
+			{false, "", "income_statement", "expenses"},
+			{false, "", "expenses", "interest_expense"},
+			{false, "", "expenses", "tax of book"},
+			{false, "", "expenses", "tax of service revenue"},
+			{false, "", "expenses", "invoice_tax"}},
 		Invoice_discounts_list: [][2]float64{{5, -10}},
 		auto_complete_entries: [][]account_method_value_price{{{"service revenue", "quantity_ratio", 0, 10}, {"tax of service revenue", "value", 1, 1}, {"tax", "value", 1, 1}, {"service_discount", "value", 1, 1}},
 			{{"book", "quantity_ratio", -1, 0}, {"revenue of book", "quantity_ratio", 1, 10}, {"cost of book", "copy_abs", 0, 0}, {"tax of book", "value", 1, 1}, {"tax", "value", 1, 1}, {"discount of book", "value", 1, 1}}},
@@ -1537,10 +1583,10 @@ func main() {
 	// }
 	// r.Flush()
 
-	balance_sheet, _, _, _ := v.financial_statements(
-		time.Date(2021, time.January, 1, 0, 0, 0, 0, time.Local),
+	balance_sheet, financial_analysis_statement, _, _ := v.financial_statements(
+		time.Date(2020, time.January, 1, 0, 0, 0, 0, time.Local),
 		time.Date(2022, time.January, 1, 0, 0, 0, 0, time.Local),
-		2, []string{"cash"}, []string{})
+		2, []string{}, 0, 0, 0)
 	w := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
 	fmt.Fprintln(w, "index\t", "account\t",
 		"value_normal\t", "value_average\t", "value_increase\t", "value_decrease\t", "value_increase_or_decrease\t", "value_inflow\t",
@@ -1570,9 +1616,12 @@ func main() {
 	// }
 	// t.Flush()
 
-	// for _, a := range financial_analysis_statement {
-	// 	fmt.Println(a)
-	// }
+	p := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
+	fmt.Fprintln(p, "current_ratio\t", "acid_test\t", "receivables_turnover\t", "inventory_turnover\t", "profit_margin\t", "asset_turnover\t", "return_on_assets\t", "return_on_equity\t", "return_on_common_stockholders_equity\t", "earnings_per_share\t", "price_earnings_ratio\t", "payout_ratio\t", "debt_to_total_assets_ratio\t", "times_interest_earned\t")
+	for _, a := range financial_analysis_statement {
+		fmt.Fprintln(p, a.current_ratio, "\t", a.acid_test, "\t", a.receivables_turnover, "\t", a.inventory_turnover, "\t", a.profit_margin, "\t", a.asset_turnover, "\t", a.return_on_assets, "\t", a.return_on_equity, "\t", a.return_on_common_stockholders_equity, "\t", a.earnings_per_share, "\t", a.price_earnings_ratio, "\t", a.payout_ratio, "\t", a.debt_to_total_assets_ratio, "\t", a.times_interest_earned, "\t")
+	}
+	p.Flush()
 
 	// r := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
 	// for _, v := range all_flows_for_all {
