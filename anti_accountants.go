@@ -148,9 +148,9 @@ type cvp_statistics struct {
 }
 
 type cvp struct {
-	name                                                              string
-	units, selling_price_per_unit, variable_cost_per_unit, fixed_cost float64
-	portions                                                          []float64
+	name                                                                         string
+	units, units_gap, selling_price_per_unit, variable_cost_per_unit, fixed_cost float64
+	portions                                                                     []float64
 }
 
 type overhead struct {
@@ -1388,7 +1388,6 @@ func (s Managerial_Accounting) cost_of_goods_sold() float64 {
 }
 
 func (s Managerial_Accounting) cost_volume_profit_slice() []cvp_statistics {
-	var h []cvp_statistics
 	length_fixed_cost := len(s.cvp[0].portions)
 	total_portions := make([]float64, length_fixed_cost)
 	for _, i := range s.cvp {
@@ -1404,6 +1403,7 @@ func (s Managerial_Accounting) cost_volume_profit_slice() []cvp_statistics {
 			log.Panic("length of portions and fixed_cost in overhead that have portions percent_method, should be all the same length")
 		}
 	}
+	var h []cvp_statistics
 	for _, i := range s.cvp {
 		h = append(h, cost_volume_profit(i.name, i.units, i.selling_price_per_unit, i.variable_cost_per_unit, i.fixed_cost))
 	}
@@ -1416,6 +1416,9 @@ func (s Managerial_Accounting) cost_volume_profit_slice() []cvp_statistics {
 		for indexb, b := range h {
 			var percent float64
 			switch a.percent_method {
+			case "units_gap":
+				b.variable_cost_per_unit = (b.variable_cost_per_unit * b.units) / (b.units - s.cvp[indexb].units_gap)
+				b.units -= s.cvp[indexb].units_gap
 			case "1":
 				percent = 1
 			case "equally":
@@ -1439,7 +1442,7 @@ func (s Managerial_Accounting) cost_volume_profit_slice() []cvp_statistics {
 				}
 				percent = sum_portions_cost / total_overhead_cost
 			default:
-				log.Panic(a.percent_method, " is not in [1,equally,units,fixed_cost,mixed_cost,sales,profit,contribution_margin,portions]")
+				log.Panic(a.percent_method, " is not in [units_gap,1,equally,units,fixed_cost,mixed_cost,sales,profit,contribution_margin,portions]")
 			}
 			if math.IsNaN(percent) {
 				percent = 0
@@ -1624,31 +1627,31 @@ func main() {
 	// }
 	// r.Flush()
 
-	balance_sheet, financial_analysis_statement, all_flows_for_all, _ := v.financial_statements(
-		time.Date(2000, time.January, 1, 0, 0, 0, 0, time.Local),
-		time.Date(2022, time.January, 1, 0, 0, 0, 0, time.Local),
-		1, []string{})
-	w := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
-	fmt.Fprintln(w, "index\t", "account\t",
-		"value_normal\t", "value_average\t", "value_increase\t", "value_decrease\t", "value_increase_or_decrease\t", "value_inflow\t",
-		"value_outflow\t", "value_flow\t", "value_turnover\t", "value_percent\t", "value_change_since_base_period\t", "value_growth_ratio_to_base_period\t",
-		"price_normal\t", "price_average\t", "price_increase\t", "price_decrease\t", "price_increase_or_decrease\t", "price_inflow\t",
-		"price_outflow\t", "price_flow\t", "price_turnover\t", "price_percent\t", "price_change_since_base_period\t", "price_growth_ratio_to_base_period\t",
-		"quantity_normal\t", "quantity_average\t", "quantity_increase\t", "quantity_decrease\t", "quantity_increase_or_decrease\t", "quantity_inflow\t",
-		"quantity_outflow\t", "quantity_flow\t", "quantity_turnover\t", "quantity_percent\t", "quantity_change_since_base_period\t", "quantity_growth_ratio_to_base_period\t")
-	for index, a := range balance_sheet {
-		for _, b := range a {
-			fmt.Fprintln(w, index, "\t", b.account, "\t",
-				b.value_normal, "\t", b.value_average, "\t", b.value_increase, "\t", b.value_decrease, "\t", b.value_increase_or_decrease, "\t", b.value_inflow, "\t",
-				b.value_outflow, "\t", b.value_flow, "\t", b.value_turnover, "\t", b.value_percent, "\t", b.value_change_since_base_period, "\t", b.value_growth_ratio_to_base_period, "\t",
-				b.price_normal, "\t", b.price_average, "\t", b.price_increase, "\t", b.price_decrease, "\t", b.price_increase_or_decrease, "\t", b.price_inflow, "\t",
-				b.price_outflow, "\t", b.price_flow, "\t", b.price_turnover, "\t", b.price_percent, "\t", b.price_change_since_base_period, "\t", b.price_growth_ratio_to_base_period, "\t",
-				b.quantity_normal, "\t", b.quantity_average, "\t", b.quantity_increase, "\t", b.quantity_decrease, "\t", b.quantity_increase_or_decrease, "\t", b.quantity_inflow, "\t",
-				b.quantity_outflow, "\t", b.quantity_flow, "\t", b.quantity_turnover, "\t", b.quantity_percent, "\t", b.quantity_change_since_base_period, "\t", b.quantity_growth_ratio_to_base_period, "\t")
-		}
-		fmt.Fprintln(w, "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t")
-	}
-	w.Flush()
+	// balance_sheet, financial_analysis_statement, all_flows_for_all, _ := v.financial_statements(
+	// 	time.Date(2000, time.January, 1, 0, 0, 0, 0, time.Local),
+	// 	time.Date(2022, time.January, 1, 0, 0, 0, 0, time.Local),
+	// 	1, []string{})
+	// w := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
+	// fmt.Fprintln(w, "index\t", "account\t",
+	// 	"value_normal\t", "value_average\t", "value_increase\t", "value_decrease\t", "value_increase_or_decrease\t", "value_inflow\t",
+	// 	"value_outflow\t", "value_flow\t", "value_turnover\t", "value_percent\t", "value_change_since_base_period\t", "value_growth_ratio_to_base_period\t",
+	// 	"price_normal\t", "price_average\t", "price_increase\t", "price_decrease\t", "price_increase_or_decrease\t", "price_inflow\t",
+	// 	"price_outflow\t", "price_flow\t", "price_turnover\t", "price_percent\t", "price_change_since_base_period\t", "price_growth_ratio_to_base_period\t",
+	// 	"quantity_normal\t", "quantity_average\t", "quantity_increase\t", "quantity_decrease\t", "quantity_increase_or_decrease\t", "quantity_inflow\t",
+	// 	"quantity_outflow\t", "quantity_flow\t", "quantity_turnover\t", "quantity_percent\t", "quantity_change_since_base_period\t", "quantity_growth_ratio_to_base_period\t")
+	// for index, a := range balance_sheet {
+	// 	for _, b := range a {
+	// 		fmt.Fprintln(w, index, "\t", b.account, "\t",
+	// 			b.value_normal, "\t", b.value_average, "\t", b.value_increase, "\t", b.value_decrease, "\t", b.value_increase_or_decrease, "\t", b.value_inflow, "\t",
+	// 			b.value_outflow, "\t", b.value_flow, "\t", b.value_turnover, "\t", b.value_percent, "\t", b.value_change_since_base_period, "\t", b.value_growth_ratio_to_base_period, "\t",
+	// 			b.price_normal, "\t", b.price_average, "\t", b.price_increase, "\t", b.price_decrease, "\t", b.price_increase_or_decrease, "\t", b.price_inflow, "\t",
+	// 			b.price_outflow, "\t", b.price_flow, "\t", b.price_turnover, "\t", b.price_percent, "\t", b.price_change_since_base_period, "\t", b.price_growth_ratio_to_base_period, "\t",
+	// 			b.quantity_normal, "\t", b.quantity_average, "\t", b.quantity_increase, "\t", b.quantity_decrease, "\t", b.quantity_increase_or_decrease, "\t", b.quantity_inflow, "\t",
+	// 			b.quantity_outflow, "\t", b.quantity_flow, "\t", b.quantity_turnover, "\t", b.quantity_percent, "\t", b.quantity_change_since_base_period, "\t", b.quantity_growth_ratio_to_base_period, "\t")
+	// 	}
+	// 	fmt.Fprintln(w, "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t")
+	// }
+	// w.Flush()
 
 	// t := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
 	// fmt.Fprintln(t, "date\t", "entry_number\t", "account\t", "value\t", "price\t", "quantity\t", "barcode\t", "entry_expair\t", "description\t", "name\t", "employee_name\t", "entry_date\t", "reverse")
@@ -1657,31 +1660,31 @@ func main() {
 	// }
 	// t.Flush()
 
-	p := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
-	fmt.Fprintln(p, "current_ratio\t", "acid_test\t", "receivables_turnover\t", "inventory_turnover\t", "profit_margin\t", "asset_turnover\t", "return_on_assets\t", "return_on_equity\t", "return_on_common_stockholders_equity\t", "earnings_per_share\t", "price_earnings_ratio\t", "payout_ratio\t", "debt_to_total_assets_ratio\t", "times_interest_earned\t")
-	for _, a := range financial_analysis_statement {
-		fmt.Fprintln(p, a.current_ratio, "\t", a.acid_test, "\t", a.receivables_turnover, "\t", a.inventory_turnover, "\t", a.profit_margin, "\t", a.asset_turnover, "\t", a.return_on_assets, "\t", a.return_on_equity, "\t", a.return_on_common_stockholders_equity, "\t", a.earnings_per_share, "\t", a.price_earnings_ratio, "\t", a.payout_ratio, "\t", a.debt_to_total_assets_ratio, "\t", a.times_interest_earned, "\t")
-	}
-	p.Flush()
+	// p := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
+	// fmt.Fprintln(p, "current_ratio\t", "acid_test\t", "receivables_turnover\t", "inventory_turnover\t", "profit_margin\t", "asset_turnover\t", "return_on_assets\t", "return_on_equity\t", "return_on_common_stockholders_equity\t", "earnings_per_share\t", "price_earnings_ratio\t", "payout_ratio\t", "debt_to_total_assets_ratio\t", "times_interest_earned\t")
+	// for _, a := range financial_analysis_statement {
+	// 	fmt.Fprintln(p, a.current_ratio, "\t", a.acid_test, "\t", a.receivables_turnover, "\t", a.inventory_turnover, "\t", a.profit_margin, "\t", a.asset_turnover, "\t", a.return_on_assets, "\t", a.return_on_equity, "\t", a.return_on_common_stockholders_equity, "\t", a.earnings_per_share, "\t", a.price_earnings_ratio, "\t", a.payout_ratio, "\t", a.debt_to_total_assets_ratio, "\t", a.times_interest_earned, "\t")
+	// }
+	// p.Flush()
 
-	r := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
-	for _, v := range all_flows_for_all {
-		fmt.Fprintln(r, "/////////////////////////////////////////////////////////////////////////////////////////////")
-		for keya, a := range v {
-			for keyb, b := range a {
-				for keyc, c := range b {
-					for keyd, d := range c {
-						for keye, e := range d {
-							if keyb == "assets" && keyd == "value" && keye == "normal" {
-								fmt.Fprintln(r, keya, "\t", keyb, "\t", keyc, "\t", keyd, "\t", keye, "\t", e)
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-	r.Flush()
+	// r := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
+	// for _, v := range all_flows_for_all {
+	// 	fmt.Fprintln(r, "/////////////////////////////////////////////////////////////////////////////////////////////")
+	// 	for keya, a := range v {
+	// 		for keyb, b := range a {
+	// 			for keyc, c := range b {
+	// 				for keyd, d := range c {
+	// 					for keye, e := range d {
+	// 						if keyb == "assets" && keyd == "value" && keye == "normal" {
+	// 							fmt.Fprintln(r, keya, "\t", keyb, "\t", keyc, "\t", keyd, "\t", keye, "\t", e)
+	// 						}
+	// 					}
+	// 				}
+	// 			}
+	// 		}
+	// 	}
+	// }
+	// r.Flush()
 
 	// a1, ok1 := all_flows_for_all[0]["cash"]["book"]["yasa"]["value"]["normal"]
 	// a2, ok2 := all_flows_for_all[0]["book"]["book"]["yasa"]["value"]["normal"]
@@ -1690,21 +1693,22 @@ func main() {
 	// fmt.Println(a2, ok2)
 	// fmt.Println(a3, ok3)
 
-	// point := Managerial_Accounting{
-	// 	cvp: []cvp{
-	// 		{"fe", 5, 4000, 1000, 0, []float64{4, 5}},
-	// 		{"al", 4, 4000, 1800, 0, []float64{4, 5}}},
-	// 	overhead: []overhead{
-	// 		{"equally", []float64{60}},
-	// 		{"portions", []float64{10000, 5000}},
-	// 		{"fixed_cost", []float64{500}},
-	// 	},
-	// }
-	// j := point.cost_volume_profit_slice()
-	// q := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
-	// fmt.Fprintln(q, "name\t", "units\t", "selling_price_per_unit\t", "variable_cost_per_unit\t", "fixed_cost\t", "mixed_cost\t", "mixed_cost_per_unit\t", "sales\t", "profit\t", "profit_per_unit\t", "contribution_margin_per_unit\t", "contribution_margin\t", "contribution_margin_ratio\t", "break_even_in_unit\t", "break_even_in_sales\t", "degree_of_operating_leverage\t")
-	// for _, i := range j {
-	// 	fmt.Fprintln(q, i.name, "\t", i.units, "\t", i.selling_price_per_unit, "\t", i.variable_cost_per_unit, "\t", i.fixed_cost, "\t", i.mixed_cost, "\t", i.mixed_cost_per_unit, "\t", i.sales, "\t", i.profit, "\t", i.profit_per_unit, "\t", i.contribution_margin_per_unit, "\t", i.contribution_margin, "\t", i.contribution_margin_ratio, "\t", i.break_even_in_unit, "\t", i.break_even_in_sales, "\t", i.degree_of_operating_leverage, "\t")
-	// }
-	// q.Flush()
+	point := Managerial_Accounting{
+		cvp: []cvp{
+			{"book1", 10, 3, 15, 8, 0, []float64{0}},
+			{"book2", 5, 0, 5, 4, 0, []float64{0}}},
+		overhead: []overhead{
+			{"units_gap", []float64{0}},
+			{"units", []float64{5}},
+			// {"portions", []float64{1000}},
+			// {"fixed_cost", []float64{500}},
+		},
+	}
+	j := point.cost_volume_profit_slice()
+	q := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
+	fmt.Fprintln(q, "name\t", "units\t", "selling_price_per_unit\t", "variable_cost_per_unit\t", "fixed_cost\t", "mixed_cost\t", "mixed_cost_per_unit\t", "sales\t", "profit\t", "profit_per_unit\t", "contribution_margin_per_unit\t", "contribution_margin\t", "contribution_margin_ratio\t", "break_even_in_unit\t", "break_even_in_sales\t", "degree_of_operating_leverage\t")
+	for _, i := range j {
+		fmt.Fprintln(q, i.name, "\t", i.units, "\t", i.selling_price_per_unit, "\t", i.variable_cost_per_unit, "\t", i.fixed_cost, "\t", i.mixed_cost, "\t", i.mixed_cost_per_unit, "\t", i.sales, "\t", i.profit, "\t", i.profit_per_unit, "\t", i.contribution_margin_per_unit, "\t", i.contribution_margin, "\t", i.contribution_margin_ratio, "\t", i.break_even_in_unit, "\t", i.break_even_in_sales, "\t", i.degree_of_operating_leverage, "\t")
+	}
+	q.Flush()
 }
