@@ -154,8 +154,8 @@ type cvp struct {
 }
 
 type overhead struct {
-	percent_method string
-	fixed_cost     []float64
+	variable_or_fixed, distribution_method string
+	fixed_cost                             []float64
 }
 
 type Managerial_Accounting struct {
@@ -1392,15 +1392,15 @@ func (s Managerial_Accounting) cost_volume_profit_slice() []cvp_statistics {
 	total_portions := make([]float64, length_fixed_cost)
 	for _, i := range s.cvp {
 		if length_fixed_cost != len(i.portions) {
-			log.Panic("length of portions and fixed_cost in overhead that have portions percent_method, should be all the same length")
+			log.Panic("length of portions and fixed_cost in overhead that have portions distribution_method, should be all the same length")
 		}
 		for index, i := range i.portions {
 			total_portions[index] += i
 		}
 	}
 	for _, i := range s.overhead {
-		if length_fixed_cost != len(i.fixed_cost) && i.percent_method == "portions" {
-			log.Panic("length of portions and fixed_cost in overhead that have portions percent_method, should be all the same length")
+		if length_fixed_cost != len(i.fixed_cost) && i.distribution_method == "portions" {
+			log.Panic("length of portions and fixed_cost in overhead that have portions distribution_method, should be all the same length")
 		}
 	}
 	var h []cvp_statistics
@@ -1414,40 +1414,45 @@ func (s Managerial_Accounting) cost_volume_profit_slice() []cvp_statistics {
 			total_overhead_cost += i
 		}
 		for indexb, b := range h {
-			var percent float64
-			switch a.percent_method {
+			var total_overhead_cost_to_sum float64
+			switch a.distribution_method {
 			case "units_gap":
-				b.variable_cost_per_unit = (b.variable_cost_per_unit * b.units) / (b.units - s.cvp[indexb].units_gap)
+				total_overhead_cost_to_sum = s.cvp[indexb].units_gap * b.variable_cost_per_unit
 				b.units -= s.cvp[indexb].units_gap
 			case "1":
-				percent = 1
+				total_overhead_cost_to_sum = total_overhead_cost
 			case "equally":
-				percent = 1 / float64(len(s.cvp))
+				total_overhead_cost_to_sum = total_overhead_cost / float64(len(s.cvp))
 			case "units":
-				percent = b.units / totals.units
+				total_overhead_cost_to_sum = total_overhead_cost * b.units / totals.units
 			case "fixed_cost":
-				percent = b.fixed_cost / totals.fixed_cost
+				total_overhead_cost_to_sum = total_overhead_cost * b.fixed_cost / totals.fixed_cost
 			case "mixed_cost":
-				percent = b.mixed_cost / totals.mixed_cost
+				total_overhead_cost_to_sum = total_overhead_cost * b.mixed_cost / totals.mixed_cost
 			case "sales":
-				percent = b.sales / totals.sales
+				total_overhead_cost_to_sum = total_overhead_cost * b.sales / totals.sales
 			case "profit":
-				percent = b.profit / totals.profit
+				total_overhead_cost_to_sum = total_overhead_cost * b.profit / totals.profit
 			case "contribution_margin":
-				percent = b.contribution_margin / totals.contribution_margin
+				total_overhead_cost_to_sum = total_overhead_cost * b.contribution_margin / totals.contribution_margin
 			case "portions":
 				var sum_portions_cost float64
 				for indexc, c := range s.cvp[indexb].portions {
 					sum_portions_cost += c / total_portions[indexc] * a.fixed_cost[indexc]
 				}
-				percent = sum_portions_cost / total_overhead_cost
+				total_overhead_cost_to_sum = total_overhead_cost * sum_portions_cost / total_overhead_cost
 			default:
-				log.Panic(a.percent_method, " is not in [units_gap,1,equally,units,fixed_cost,mixed_cost,sales,profit,contribution_margin,portions]")
+				log.Panic(a.distribution_method, " is not in [units_gap,1,equally,units,fixed_cost,mixed_cost,sales,profit,contribution_margin,portions]")
 			}
-			if math.IsNaN(percent) {
-				percent = 0
+			switch a.variable_or_fixed {
+			case "fixed":
+				b.fixed_cost += total_overhead_cost_to_sum
+			case "variable":
+				b.variable_cost_per_unit = ((b.variable_cost_per_unit * b.units) + total_overhead_cost_to_sum) / b.units
+			default:
+				log.Panic(a.variable_or_fixed, " is not in [variable,fixed]")
 			}
-			h[indexb] = cost_volume_profit(b.name, b.units, b.selling_price_per_unit, b.variable_cost_per_unit, b.fixed_cost+(percent*total_overhead_cost))
+			h[indexb] = cost_volume_profit(b.name, b.units, b.selling_price_per_unit, b.variable_cost_per_unit, b.fixed_cost)
 		}
 	}
 	return append(h, total_cost_volume_profit(h))
@@ -1695,11 +1700,11 @@ func main() {
 
 	point := Managerial_Accounting{
 		cvp: []cvp{
-			{"book1", 10, 3, 15, 8, 0, []float64{0}},
-			{"book2", 5, 0, 5, 4, 0, []float64{0}}},
+			{"book1", 10, 1, 15, 5, 0, []float64{0}},
+			{"book2", 10, 0, 15, 5, 0, []float64{0}}},
 		overhead: []overhead{
-			{"units_gap", []float64{0}},
-			{"units", []float64{5}},
+			// {"fixed", "units_gap", []float64{0}},
+			{"fixed", "units", []float64{0}},
 			// {"portions", []float64{1000}},
 			// {"fixed_cost", []float64{500}},
 		},
