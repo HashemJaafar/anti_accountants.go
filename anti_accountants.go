@@ -154,8 +154,8 @@ type cvp struct {
 }
 
 type overhead struct {
-	variable_or_fixed, distribution_method string
-	fixed_cost                             []float64
+	sales_or_variable_or_fixed, distribution_method string
+	fixed_cost                                      []float64
 }
 
 type Managerial_Accounting struct {
@@ -1416,6 +1416,8 @@ func (s Managerial_Accounting) cost_volume_profit_slice() []cvp_statistics {
 		for indexb, b := range h {
 			var total_overhead_cost_to_sum float64
 			switch a.distribution_method {
+			case "percent_from_sales":
+				total_overhead_cost_to_sum = total_overhead_cost * b.sales
 			case "units_gap":
 				total_overhead_cost_to_sum = s.cvp[indexb].units_gap * b.variable_cost_per_unit
 				b.units -= s.cvp[indexb].units_gap
@@ -1442,15 +1444,17 @@ func (s Managerial_Accounting) cost_volume_profit_slice() []cvp_statistics {
 				}
 				total_overhead_cost_to_sum = total_overhead_cost * sum_portions_cost / total_overhead_cost
 			default:
-				log.Panic(a.distribution_method, " is not in [units_gap,1,equally,units,fixed_cost,mixed_cost,sales,profit,contribution_margin,portions]")
+				log.Panic(a.distribution_method, " is not in [percent_from_sales,units_gap,1,equally,units,fixed_cost,mixed_cost,sales,profit,contribution_margin,portions]")
 			}
-			switch a.variable_or_fixed {
-			case "fixed":
-				b.fixed_cost += total_overhead_cost_to_sum
+			switch a.sales_or_variable_or_fixed {
+			case "sales":
+				b.selling_price_per_unit = ((b.selling_price_per_unit * b.units) - total_overhead_cost_to_sum) / b.units
 			case "variable":
 				b.variable_cost_per_unit = ((b.variable_cost_per_unit * b.units) + total_overhead_cost_to_sum) / b.units
+			case "fixed":
+				b.fixed_cost += total_overhead_cost_to_sum
 			default:
-				log.Panic(a.variable_or_fixed, " is not in [variable,fixed]")
+				log.Panic(a.sales_or_variable_or_fixed, " is not in [sales,variable,fixed]")
 			}
 			h[indexb] = cost_volume_profit(b.name, b.units, b.selling_price_per_unit, b.variable_cost_per_unit, b.fixed_cost)
 		}
@@ -1704,7 +1708,7 @@ func main() {
 			{"book2", 10, 0, 15, 5, 0, []float64{0}}},
 		overhead: []overhead{
 			// {"fixed", "units_gap", []float64{0}},
-			{"fixed", "units", []float64{0}},
+			{"fixed", "percent_from_sales", []float64{0.1}},
 			// {"portions", []float64{1000}},
 			// {"fixed_cost", []float64{500}},
 		},
