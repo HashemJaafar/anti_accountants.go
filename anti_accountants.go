@@ -761,10 +761,25 @@ func (s Financial_accounting) all_values(journal []journal_tag, start_date, end_
 			}
 		}
 	}
-	for _, map_account_flow := range new_all_values {
+	for key_account_flow, map_account_flow := range new_all_values {
 		for _, map_account := range map_account_flow {
-			for _, map_name := range map_account {
-				calculate_vpq(map_name)
+			for key_name, map_name := range map_account {
+				if map_name["price"] == nil {
+					map_name["price"] = map[string]float64{}
+				}
+				for key_vpq, map_vpq := range map_name {
+					map_vpq["increase_or_decrease"] = map_vpq["increase"] - map_vpq["decrease"]
+					map_vpq["ending_balance"] = map_vpq["beginning_balance"] + map_vpq["increase_or_decrease"]
+					map_vpq["flow"] = map_vpq["inflow"] - map_vpq["outflow"]
+					map_vpq["average"] = map_vpq["beginning_balance"] + map_vpq["increase_or_decrease"]/2
+					map_vpq["turnover"] = map_vpq["inflow"] / map_vpq["average"]
+					map_vpq["growth_ratio"] = map_vpq["ending_balance"] / map_vpq["beginning_balance"]
+					map_vpq["percent"] = map_vpq["ending_balance"] /
+						(map_account_flow[key_account_flow][key_name][key_vpq]["beginning_balance"] + map_account_flow[key_account_flow][key_name][key_vpq]["increase"] - map_account_flow[key_account_flow][key_name][key_vpq]["decrease"])
+					for key_number, _ := range map_vpq {
+						map_name["price"][key_number] = map_name["value"][key_number] / map_name["quantity"][key_number]
+					}
+				}
 			}
 		}
 	}
@@ -1123,7 +1138,21 @@ func (s Financial_accounting) sum_and_extract_new_map(statement_map map[string]m
 		}
 	}
 	for _, map_account := range new_statement_map {
-		calculate_vpq(map_account)
+		if map_account["price"] == nil {
+			map_account["price"] = map[string]float64{}
+		}
+		for key_vpq, map_vpq := range map_account {
+			map_vpq["increase_or_decrease"] = map_vpq["increase"] - map_vpq["decrease"]
+			map_vpq["ending_balance"] = map_vpq["beginning_balance"] + map_vpq["increase_or_decrease"]
+			map_vpq["flow"] = map_vpq["inflow"] - map_vpq["outflow"]
+			map_vpq["average"] = map_vpq["beginning_balance"] + map_vpq["increase_or_decrease"]/2
+			map_vpq["turnover"] = map_vpq["inflow"] / map_vpq["average"]
+			map_vpq["growth_ratio"] = map_vpq["ending_balance"] / map_vpq["beginning_balance"]
+			map_vpq["percent"] = map_vpq["ending_balance"] / (new_statement_map[flow_account][key_vpq]["beginning_balance"] + new_statement_map[flow_account][key_vpq]["increase"] - new_statement_map[flow_account][key_vpq]["decrease"])
+			for key_number, _ := range map_vpq {
+				map_account["price"][key_number] = map_account["value"][key_number] / map_account["quantity"][key_number]
+			}
+		}
 	}
 	return new_statement_map
 }
@@ -1138,22 +1167,29 @@ func sum_flows(a journal_tag, b journal_tag, x float64, all_flows map[string]map
 	}
 }
 
-func calculate_vpq(map_before_vpq map[string]map[string]float64) {
-	if map_before_vpq["price"] == nil {
-		map_before_vpq["price"] = map[string]float64{}
-	}
-	for _, map_vpq := range map_before_vpq {
-		map_vpq["increase_or_decrease"] = map_vpq["increase"] - map_vpq["decrease"]
-		map_vpq["ending_balance"] = map_vpq["beginning_balance"] + map_vpq["increase_or_decrease"]
-		map_vpq["flow"] = map_vpq["inflow"] - map_vpq["outflow"]
-		map_vpq["average"] = map_vpq["beginning_balance"] + map_vpq["increase_or_decrease"]/2
-		map_vpq["turnover"] = map_vpq["inflow"] / map_vpq["average"]
-		map_vpq["growth_ratio"] = map_vpq["ending_balance"] / map_vpq["beginning_balance"]
-		for key_number, _ := range map_vpq {
-			map_before_vpq["price"][key_number] = map_before_vpq["value"][key_number] / map_before_vpq["quantity"][key_number]
-		}
-	}
-}
+// func calculate_vpq(new_all_values map[string]map[string]map[string]map[string]map[string]float64) {
+// 	for _, map_account_flow := range new_all_values {
+// 		for key_account, map_account := range map_account_flow {
+// 			for key_name, map_name := range map_account {
+// 				if map_name["price"] == nil {
+// 					map_name["price"] = map[string]float64{}
+// 				}
+// 				for key_vpq, map_vpq := range map_name {
+// 					map_vpq["increase_or_decrease"] = map_vpq["increase"] - map_vpq["decrease"]
+// 					map_vpq["ending_balance"] = map_vpq["beginning_balance"] + map_vpq["increase_or_decrease"]
+// 					map_vpq["flow"] = map_vpq["inflow"] - map_vpq["outflow"]
+// 					map_vpq["average"] = map_vpq["beginning_balance"] + map_vpq["increase_or_decrease"]/2
+// 					map_vpq["turnover"] = map_vpq["inflow"] / map_vpq["average"]
+// 					map_vpq["growth_ratio"] = map_vpq["ending_balance"] / map_vpq["beginning_balance"]
+// 					map_vpq["percent"] = map_account_flow[key_account][key_name][key_vpq]["ending_balance"] / (map_account_flow[key_account][key_name][key_vpq]["beginning_balance"] + map_account_flow[key_account][key_name][key_vpq]["beginning_balance"] - map_account_flow[key_account][key_name][key_vpq]["beginning_balance"])
+// 					for key_number, _ := range map_vpq {
+// 						map_name["price"][key_number] = map_name["value"][key_number] / map_name["quantity"][key_number]
+// 					}
+// 				}
+// 			}
+// 		}
+// 	}
+// }
 
 func select_journal(entry_number uint, account string, start_date, end_date time.Time) []journal_tag {
 	var journal []journal_tag
@@ -1634,7 +1670,7 @@ func main() {
 		}
 		fmt.Fprintln(w, "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t")
 	}
-	w.Flush()
+	// w.Flush()
 
 	// t := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
 	// fmt.Fprintln(t, "date\t", "entry_number\t", "account\t", "value\t", "price\t", "quantity\t", "barcode\t", "entry_expair\t", "description\t", "name\t", "employee_name\t", "entry_date\t", "reverse")
@@ -1650,24 +1686,24 @@ func main() {
 	}
 	// p.Flush()
 
-	// r := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
-	// for _, v := range all_flows_for_all {
-	// 	fmt.Fprintln(r, "/////////////////////////////////////////////////////////////////////////////////////////////")
-	// 	for keya, a := range v {
-	// 		for keyb, b := range a {
-	// 			for keyc, c := range b {
-	// 				for keyd, d := range c {
-	// 					for keye, e := range d {
-	// 						if keya == "cash" && keyd == "value" && keye == "growth_ratio" {
-	// 							fmt.Fprintln(r, keya, "\t", keyb, "\t", keyc, "\t", keyd, "\t", keye, "\t", e)
-	// 						}
-	// 					}
-	// 				}
-	// 			}
-	// 		}
-	// 	}
-	// }
-	// r.Flush()
+	r := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
+	for _, v := range all_flows_for_all {
+		fmt.Fprintln(r, "/////////////////////////////////////////////////////////////////////////////////////////////")
+		for keya, a := range v {
+			for keyb, b := range a {
+				for keyc, c := range b {
+					for keyd, d := range c {
+						for keye, e := range d {
+							if keya == "cash" && keyd == "value" && keye == "percent" {
+								fmt.Fprintln(r, keya, "\t", keyb, "\t", keyc, "\t", keyd, "\t", keye, "\t", e)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	r.Flush()
 
 	a1, ok1 := all_flows_for_all[0]["cash"]["assets"]["yasa"]["value"]["ending_balance"]
 	a2, ok2 := all_flows_for_all[0]["cash"]["cash"]["yasa"]["value"]["ending_balance"]
