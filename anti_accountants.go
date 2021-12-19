@@ -707,7 +707,6 @@ func (s Financial_accounting) all_values(journal []journal_tag, start_date, end_
 						all_values1[key_account_flow][key_account][key_name][key_vpq][key_number] = map_vpq[key_number]
 						all_values1[key_account_flow][key_account][key_name][key_vpq]["inflow"] = all_flows[key_account_flow][key_account][key_name][key_vpq]["inflow"]
 						all_values1[key_account_flow][key_account][key_name][key_vpq]["outflow"] = all_flows[key_account_flow][key_account][key_name][key_vpq]["outflow"]
-						all_values1[key_account_flow][key_account][key_name][key_vpq]["flow"] = all_flows[key_account_flow][key_account][key_name][key_vpq]["flow"]
 					}
 				}
 			}
@@ -739,7 +738,7 @@ func (s Financial_accounting) all_values(journal []journal_tag, start_date, end_
 								}
 								for key_number, number := range map_vpq {
 									switch {
-									case !is_in(key_number, []string{"inflow", "outflow", "flow"}):
+									case !is_in(key_number, []string{"inflow", "outflow"}):
 										if s.is_credit(key1) == s.is_credit(ss.name) {
 											new_all_values[key_account_flow][ss.name][key_name][key_vpq][key_number] += number
 										} else {
@@ -769,10 +768,15 @@ func (s Financial_accounting) all_values(journal []journal_tag, start_date, end_
 					map_name["price"] = map[string]float64{}
 				}
 				for _, map_vpq := range map_name {
+					map_vpq["increase_or_decrease"] = map_vpq["increase"] - map_vpq["decrease"]
+					map_vpq["ending_balance"] = map_vpq["beginning_balance"] + map_vpq["increase_or_decrease"]
+					map_vpq["flow"] = map_vpq["inflow"] - map_vpq["outflow"]
+					map_vpq["average"] = map_vpq["beginning_balance"] + map_vpq["increase_or_decrease"]/2
+					map_vpq["turnover"] = map_vpq["inflow"] / map_vpq["average"]
+					map_vpq["growth_ratio"] = map_vpq["ending_balance"] / map_vpq["beginning_balance"]
 					for key_number, _ := range map_vpq {
 						map_name["price"][key_number] = map_name["value"][key_number] / map_name["quantity"][key_number]
 					}
-					map_vpq["turnover"] = map_vpq["inflow"] / map_vpq["average"]
 				}
 			}
 		}
@@ -809,29 +813,17 @@ func (s Financial_accounting) sum_values(date, start_date time.Time, one_compoun
 		if date.Before(start_date) {
 			switch {
 			case s.is_father(s.retained_earnings, b.account) && s.is_credit(b.account):
-				all_flows[s.retained_earnings][b.name]["value"]["normal"] += b.value
-				all_flows[s.retained_earnings][b.name]["value"]["average"] += b.value
-				all_flows[s.retained_earnings][b.name]["quantity"]["normal"] += b.quantity
-				all_flows[s.retained_earnings][b.name]["quantity"]["average"] += b.quantity
+				all_flows[s.retained_earnings][b.name]["value"]["beginning_balance"] += b.value
+				all_flows[s.retained_earnings][b.name]["quantity"]["beginning_balance"] += b.quantity
 			case s.is_father(s.retained_earnings, b.account) && !s.is_credit(b.account):
-				all_flows[s.retained_earnings][b.name]["value"]["normal"] -= b.value
-				all_flows[s.retained_earnings][b.name]["value"]["average"] -= b.value
-				all_flows[s.retained_earnings][b.name]["quantity"]["normal"] -= b.quantity
-				all_flows[s.retained_earnings][b.name]["quantity"]["average"] -= b.quantity
+				all_flows[s.retained_earnings][b.name]["value"]["beginning_balance"] -= b.value
+				all_flows[s.retained_earnings][b.name]["quantity"]["beginning_balance"] -= b.quantity
 			default:
-				all_flows[b.account][b.name]["value"]["normal"] += b.value
-				all_flows[b.account][b.name]["value"]["average"] += b.value
-				all_flows[b.account][b.name]["quantity"]["normal"] += b.quantity
-				all_flows[b.account][b.name]["quantity"]["average"] += b.quantity
+				all_flows[b.account][b.name]["value"]["beginning_balance"] += b.value
+				all_flows[b.account][b.name]["quantity"]["beginning_balance"] += b.quantity
 			}
 		}
 		if date.After(start_date) {
-			all_flows[b.account][b.name]["value"]["normal"] += b.value
-			all_flows[b.account][b.name]["value"]["increase_or_decrease"] += b.value
-			all_flows[b.account][b.name]["value"]["average"] += b.value / 2
-			all_flows[b.account][b.name]["quantity"]["normal"] += b.quantity
-			all_flows[b.account][b.name]["quantity"]["increase_or_decrease"] += b.quantity
-			all_flows[b.account][b.name]["quantity"]["average"] += b.quantity / 2
 			if b.value >= 0 {
 				all_flows[b.account][b.name]["value"]["increase"] += math.Abs(b.value)
 				all_flows[b.account][b.name]["quantity"]["increase"] += math.Abs(b.quantity)
@@ -891,36 +883,36 @@ func (s Financial_accounting) prepare_statement(statement_map, statement_map_bas
 	new_statement_map_cost_of_goods_sold := sum_and_extract_new_map(statement_map, cost_of_goods_sold, names)
 
 	analysis := financial_analysis{
-		current_assets:                      new_statement_map_cash[s.current_assets]["value"]["normal"],
-		current_liabilities:                 new_statement_map_cash[s.current_liabilities]["value"]["normal"],
-		cash:                                new_statement_map_cash[s.cash_and_cash_equivalents]["value"]["normal"],
-		short_term_investments:              new_statement_map_cash[s.short_term_investments]["value"]["normal"],
-		net_receivables:                     new_statement_map_cash[s.receivables]["value"]["normal"],
+		current_assets:                      new_statement_map_cash[s.current_assets]["value"]["ending_balance"],
+		current_liabilities:                 new_statement_map_cash[s.current_liabilities]["value"]["ending_balance"],
+		cash:                                new_statement_map_cash[s.cash_and_cash_equivalents]["value"]["ending_balance"],
+		short_term_investments:              new_statement_map_cash[s.short_term_investments]["value"]["ending_balance"],
+		net_receivables:                     new_statement_map_cash[s.receivables]["value"]["ending_balance"],
 		net_credit_sales:                    new_statement_map_sales[s.receivables]["value"]["flow"],
 		average_net_receivables:             new_statement_map_cash[s.receivables]["value"]["average"],
-		cost_of_goods_sold:                  new_statement_map_cash[s.cost_of_goods_sold]["value"]["normal"],
+		cost_of_goods_sold:                  new_statement_map_cash[s.cost_of_goods_sold]["value"]["ending_balance"],
 		average_inventory:                   new_statement_map_cash[s.inventory]["value"]["average"],
-		net_income:                          new_statement_map_cash[s.income_statement]["value"]["normal"],
-		net_sales:                           new_statement_map_cash[s.sales]["value"]["normal"],
+		net_income:                          new_statement_map_cash[s.income_statement]["value"]["ending_balance"],
+		net_sales:                           new_statement_map_cash[s.sales]["value"]["ending_balance"],
 		average_assets:                      new_statement_map_cash[s.assets]["value"]["average"],
 		average_equity:                      new_statement_map_cash[s.equity]["value"]["average"],
 		preferred_dividends:                 0,
 		average_common_stockholders_equity:  0,
 		market_price_per_shares_outstanding: 0,
 		cash_dividends:                      new_statement_map_cash[s.dividends]["value"]["flow"],
-		total_debt:                          new_statement_map_cash[s.liabilities]["value"]["normal"],
-		total_assets:                        new_statement_map_cash[s.assets]["value"]["normal"],
-		ebitda:                              new_statement_map_cash[s.ebitda]["value"]["normal"],
-		interest_expense:                    new_statement_map_cash[s.interest_expense]["value"]["normal"],
+		total_debt:                          new_statement_map_cash[s.liabilities]["value"]["ending_balance"],
+		total_assets:                        new_statement_map_cash[s.assets]["value"]["ending_balance"],
+		ebitda:                              new_statement_map_cash[s.ebitda]["value"]["ending_balance"],
+		interest_expense:                    new_statement_map_cash[s.interest_expense]["value"]["ending_balance"],
 		weighted_average_common_shares_outstanding: 0,
 	}.financial_analysis_statement()
 
-	value_total_assets := new_statement_map_cash[s.assets]["value"]["normal"]
-	price_total_assets := new_statement_map_cash[s.assets]["price"]["normal"]
-	quantity_total_assets := new_statement_map_cash[s.assets]["quantity"]["normal"]
-	value_total_sales := new_statement_map_cash[s.sales]["value"]["normal"]
-	price_total_sales := new_statement_map_cash[s.sales]["price"]["normal"]
-	quantity_total_sales := new_statement_map_cash[s.sales]["quantity"]["normal"]
+	value_total_assets := new_statement_map_cash[s.assets]["value"]["ending_balance"]
+	price_total_assets := new_statement_map_cash[s.assets]["price"]["ending_balance"]
+	quantity_total_assets := new_statement_map_cash[s.assets]["quantity"]["ending_balance"]
+	value_total_sales := new_statement_map_cash[s.sales]["value"]["ending_balance"]
+	price_total_sales := new_statement_map_cash[s.sales]["price"]["ending_balance"]
+	quantity_total_sales := new_statement_map_cash[s.sales]["quantity"]["ending_balance"]
 
 	var value_total, price_total, quantity_total float64
 	var value_turnover, price_turnover, quantity_turnover float64
@@ -951,7 +943,7 @@ func (s Financial_accounting) prepare_statement(statement_map, statement_map_bas
 		}
 		statement_sheet = append(statement_sheet, statement{
 			account:                              key,
-			value_normal:                         v["value"]["normal"],
+			value_normal:                         v["value"]["ending_balance"],
 			value_average:                        v["value"]["average"],
 			value_increase:                       v["value"]["increase"],
 			value_decrease:                       v["value"]["decrease"],
@@ -960,10 +952,10 @@ func (s Financial_accounting) prepare_statement(statement_map, statement_map_bas
 			value_outflow:                        v["value"]["outflow"],
 			value_flow:                           v["value"]["flow"],
 			value_turnover:                       value_turnover,
-			value_percent:                        v["value"]["normal"] / value_total,
-			value_change_since_base_period:       v["value"]["normal"] - new_statement_map_base[key]["value"]["normal"],
-			value_growth_ratio_to_base_period:    v["value"]["normal"] / new_statement_map_base[key]["value"]["normal"],
-			price_normal:                         v["price"]["normal"],
+			value_percent:                        v["value"]["ending_balance"] / value_total,
+			value_change_since_base_period:       v["value"]["ending_balance"] - new_statement_map_base[key]["value"]["ending_balance"],
+			value_growth_ratio_to_base_period:    v["value"]["ending_balance"] / new_statement_map_base[key]["value"]["ending_balance"],
+			price_normal:                         v["price"]["ending_balance"],
 			price_average:                        v["price"]["average"],
 			price_increase:                       v["price"]["increase"],
 			price_decrease:                       v["price"]["decrease"],
@@ -972,10 +964,10 @@ func (s Financial_accounting) prepare_statement(statement_map, statement_map_bas
 			price_outflow:                        v["price"]["outflow"],
 			price_flow:                           v["price"]["flow"],
 			price_turnover:                       price_turnover,
-			price_percent:                        v["price"]["normal"] / price_total,
-			price_change_since_base_period:       v["price"]["normal"] - new_statement_map_base[key]["price"]["normal"],
-			price_growth_ratio_to_base_period:    v["price"]["normal"] / new_statement_map_base[key]["price"]["normal"],
-			quantity_normal:                      v["quantity"]["normal"],
+			price_percent:                        v["price"]["ending_balance"] / price_total,
+			price_change_since_base_period:       v["price"]["ending_balance"] - new_statement_map_base[key]["price"]["ending_balance"],
+			price_growth_ratio_to_base_period:    v["price"]["ending_balance"] / new_statement_map_base[key]["price"]["ending_balance"],
+			quantity_normal:                      v["quantity"]["ending_balance"],
 			quantity_average:                     v["quantity"]["average"],
 			quantity_increase:                    v["quantity"]["increase"],
 			quantity_decrease:                    v["quantity"]["decrease"],
@@ -984,9 +976,9 @@ func (s Financial_accounting) prepare_statement(statement_map, statement_map_bas
 			quantity_outflow:                     v["quantity"]["outflow"],
 			quantity_flow:                        v["quantity"]["flow"],
 			quantity_turnover:                    quantity_turnover,
-			quantity_percent:                     v["quantity"]["normal"] / quantity_total,
-			quantity_change_since_base_period:    v["quantity"]["normal"] - new_statement_map_base[key]["quantity"]["normal"],
-			quantity_growth_ratio_to_base_period: v["quantity"]["normal"] / new_statement_map_base[key]["quantity"]["normal"],
+			quantity_percent:                     v["quantity"]["ending_balance"] / quantity_total,
+			quantity_change_since_base_period:    v["quantity"]["ending_balance"] - new_statement_map_base[key]["quantity"]["ending_balance"],
+			quantity_growth_ratio_to_base_period: v["quantity"]["ending_balance"] / new_statement_map_base[key]["quantity"]["ending_balance"],
 		})
 	}
 
@@ -1131,8 +1123,6 @@ func sum_flows(a journal_tag, b journal_tag, x float64, all_flows map[string]map
 		all_flows[a.account][b.account][b.name]["value"]["inflow"] += math.Abs(b.value)
 		all_flows[a.account][b.account][b.name]["quantity"]["inflow"] += math.Abs(b.quantity)
 	}
-	all_flows[a.account][b.account][b.name]["value"]["flow"] += b.value * x
-	all_flows[a.account][b.account][b.name]["quantity"]["flow"] += b.quantity * x
 }
 
 func sum_and_extract_new_map(statement_map map[string]map[string]map[string]map[string]map[string]float64, flow_account, name []string) map[string]map[string]map[string]float64 {
@@ -1636,30 +1626,30 @@ func main() {
 	// }
 	// r.Flush()
 
-	// balance_sheet, financial_analysis_statement, all_flows_for_all, _ := v.financial_statements(
-	// 	time.Date(2000, time.January, 1, 0, 0, 0, 0, time.Local),
-	// 	time.Date(2022, time.January, 1, 0, 0, 0, 0, time.Local),
-	// 	1, []string{})
-	// w := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
-	// fmt.Fprintln(w, "index\t", "account\t",
-	// 	"value_normal\t", "value_average\t", "value_increase\t", "value_decrease\t", "value_increase_or_decrease\t", "value_inflow\t",
-	// 	"value_outflow\t", "value_flow\t", "value_turnover\t", "value_percent\t", "value_change_since_base_period\t", "value_growth_ratio_to_base_period\t",
-	// 	"price_normal\t", "price_average\t", "price_increase\t", "price_decrease\t", "price_increase_or_decrease\t", "price_inflow\t",
-	// 	"price_outflow\t", "price_flow\t", "price_turnover\t", "price_percent\t", "price_change_since_base_period\t", "price_growth_ratio_to_base_period\t",
-	// 	"quantity_normal\t", "quantity_average\t", "quantity_increase\t", "quantity_decrease\t", "quantity_increase_or_decrease\t", "quantity_inflow\t",
-	// 	"quantity_outflow\t", "quantity_flow\t", "quantity_turnover\t", "quantity_percent\t", "quantity_change_since_base_period\t", "quantity_growth_ratio_to_base_period\t")
-	// for index, a := range balance_sheet {
-	// 	for _, b := range a {
-	// 		fmt.Fprintln(w, index, "\t", b.account, "\t",
-	// 			b.value_normal, "\t", b.value_average, "\t", b.value_increase, "\t", b.value_decrease, "\t", b.value_increase_or_decrease, "\t", b.value_inflow, "\t",
-	// 			b.value_outflow, "\t", b.value_flow, "\t", b.value_turnover, "\t", b.value_percent, "\t", b.value_change_since_base_period, "\t", b.value_growth_ratio_to_base_period, "\t",
-	// 			b.price_normal, "\t", b.price_average, "\t", b.price_increase, "\t", b.price_decrease, "\t", b.price_increase_or_decrease, "\t", b.price_inflow, "\t",
-	// 			b.price_outflow, "\t", b.price_flow, "\t", b.price_turnover, "\t", b.price_percent, "\t", b.price_change_since_base_period, "\t", b.price_growth_ratio_to_base_period, "\t",
-	// 			b.quantity_normal, "\t", b.quantity_average, "\t", b.quantity_increase, "\t", b.quantity_decrease, "\t", b.quantity_increase_or_decrease, "\t", b.quantity_inflow, "\t",
-	// 			b.quantity_outflow, "\t", b.quantity_flow, "\t", b.quantity_turnover, "\t", b.quantity_percent, "\t", b.quantity_change_since_base_period, "\t", b.quantity_growth_ratio_to_base_period, "\t")
-	// 	}
-	// 	fmt.Fprintln(w, "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t")
-	// }
+	balance_sheet, financial_analysis_statement, all_flows_for_all, _ := v.financial_statements(
+		time.Date(2021, time.January, 1, 0, 0, 0, 0, time.Local),
+		time.Date(2022, time.January, 1, 0, 0, 0, 0, time.Local),
+		1, []string{})
+	w := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
+	fmt.Fprintln(w, "index\t", "account\t",
+		"value_normal\t", "value_average\t", "value_increase\t", "value_decrease\t", "value_increase_or_decrease\t", "value_inflow\t",
+		"value_outflow\t", "value_flow\t", "value_turnover\t", "value_percent\t", "value_change_since_base_period\t", "value_growth_ratio_to_base_period\t",
+		"price_normal\t", "price_average\t", "price_increase\t", "price_decrease\t", "price_increase_or_decrease\t", "price_inflow\t",
+		"price_outflow\t", "price_flow\t", "price_turnover\t", "price_percent\t", "price_change_since_base_period\t", "price_growth_ratio_to_base_period\t",
+		"quantity_normal\t", "quantity_average\t", "quantity_increase\t", "quantity_decrease\t", "quantity_increase_or_decrease\t", "quantity_inflow\t",
+		"quantity_outflow\t", "quantity_flow\t", "quantity_turnover\t", "quantity_percent\t", "quantity_change_since_base_period\t", "quantity_growth_ratio_to_base_period\t")
+	for index, a := range balance_sheet {
+		for _, b := range a {
+			fmt.Fprintln(w, index, "\t", b.account, "\t",
+				b.value_normal, "\t", b.value_average, "\t", b.value_increase, "\t", b.value_decrease, "\t", b.value_increase_or_decrease, "\t", b.value_inflow, "\t",
+				b.value_outflow, "\t", b.value_flow, "\t", b.value_turnover, "\t", b.value_percent, "\t", b.value_change_since_base_period, "\t", b.value_growth_ratio_to_base_period, "\t",
+				b.price_normal, "\t", b.price_average, "\t", b.price_increase, "\t", b.price_decrease, "\t", b.price_increase_or_decrease, "\t", b.price_inflow, "\t",
+				b.price_outflow, "\t", b.price_flow, "\t", b.price_turnover, "\t", b.price_percent, "\t", b.price_change_since_base_period, "\t", b.price_growth_ratio_to_base_period, "\t",
+				b.quantity_normal, "\t", b.quantity_average, "\t", b.quantity_increase, "\t", b.quantity_decrease, "\t", b.quantity_increase_or_decrease, "\t", b.quantity_inflow, "\t",
+				b.quantity_outflow, "\t", b.quantity_flow, "\t", b.quantity_turnover, "\t", b.quantity_percent, "\t", b.quantity_change_since_base_period, "\t", b.quantity_growth_ratio_to_base_period, "\t")
+		}
+		fmt.Fprintln(w, "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t")
+	}
 	// w.Flush()
 
 	// t := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
@@ -1669,55 +1659,55 @@ func main() {
 	// }
 	// t.Flush()
 
-	// p := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
-	// fmt.Fprintln(p, "current_ratio\t", "acid_test\t", "receivables_turnover\t", "inventory_turnover\t", "profit_margin\t", "asset_turnover\t", "return_on_assets\t", "return_on_equity\t", "return_on_common_stockholders_equity\t", "earnings_per_share\t", "price_earnings_ratio\t", "payout_ratio\t", "debt_to_total_assets_ratio\t", "times_interest_earned\t")
-	// for _, a := range financial_analysis_statement {
-	// 	fmt.Fprintln(p, a.current_ratio, "\t", a.acid_test, "\t", a.receivables_turnover, "\t", a.inventory_turnover, "\t", a.profit_margin, "\t", a.asset_turnover, "\t", a.return_on_assets, "\t", a.return_on_equity, "\t", a.return_on_common_stockholders_equity, "\t", a.earnings_per_share, "\t", a.price_earnings_ratio, "\t", a.payout_ratio, "\t", a.debt_to_total_assets_ratio, "\t", a.times_interest_earned, "\t")
-	// }
+	p := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
+	fmt.Fprintln(p, "current_ratio\t", "acid_test\t", "receivables_turnover\t", "inventory_turnover\t", "profit_margin\t", "asset_turnover\t", "return_on_assets\t", "return_on_equity\t", "return_on_common_stockholders_equity\t", "earnings_per_share\t", "price_earnings_ratio\t", "payout_ratio\t", "debt_to_total_assets_ratio\t", "times_interest_earned\t")
+	for _, a := range financial_analysis_statement {
+		fmt.Fprintln(p, a.current_ratio, "\t", a.acid_test, "\t", a.receivables_turnover, "\t", a.inventory_turnover, "\t", a.profit_margin, "\t", a.asset_turnover, "\t", a.return_on_assets, "\t", a.return_on_equity, "\t", a.return_on_common_stockholders_equity, "\t", a.earnings_per_share, "\t", a.price_earnings_ratio, "\t", a.payout_ratio, "\t", a.debt_to_total_assets_ratio, "\t", a.times_interest_earned, "\t")
+	}
 	// p.Flush()
 
-	// r := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
-	// for _, v := range all_flows_for_all {
-	// 	fmt.Fprintln(r, "/////////////////////////////////////////////////////////////////////////////////////////////")
-	// 	for keya, a := range v {
-	// 		for keyb, b := range a {
-	// 			for keyc, c := range b {
-	// 				for keyd, d := range c {
-	// 					for keye, e := range d {
-	// 						if keyb == "assets" && keyd == "value" && keye == "normal" {
-	// 							fmt.Fprintln(r, keya, "\t", keyb, "\t", keyc, "\t", keyd, "\t", keye, "\t", e)
-	// 						}
-	// 					}
-	// 				}
-	// 			}
-	// 		}
-	// 	}
+	r := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
+	for _, v := range all_flows_for_all {
+		fmt.Fprintln(r, "/////////////////////////////////////////////////////////////////////////////////////////////")
+		for keya, a := range v {
+			for keyb, b := range a {
+				for keyc, c := range b {
+					for keyd, d := range c {
+						for keye, e := range d {
+							if keya == "cash" && keyd == "price" && keye == "growth_ratio" {
+								fmt.Fprintln(r, keya, "\t", keyb, "\t", keyc, "\t", keyd, "\t", keye, "\t", e)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	r.Flush()
+
+	a1, ok1 := all_flows_for_all[0]["cash"]["assets"]["yasa"]["value"]["ending_balance"]
+	a2, ok2 := all_flows_for_all[0]["cash"]["cash"]["yasa"]["value"]["ending_balance"]
+	a3, ok3 := all_flows_for_all[0]["cash"]["tax"]["yasa"]["value"]["ending_balance"]
+	fmt.Println(a1, ok1)
+	fmt.Println(a2, ok2)
+	fmt.Println(a3, ok3)
+
+	// point := Managerial_Accounting{
+	// 	cvp: []cvp{
+	// 		{"book1", 10, 1, 15, 5, 0, []float64{0}},
+	// 		{"book2", 10, 0, 15, 5, 0, []float64{0}}},
+	// 	overhead: []overhead{
+	// 		// {"fixed", "units_gap", []float64{0}},
+	// 		{"fixed", "percent_from_sales", []float64{0.1}},
+	// 		// {"portions", []float64{1000}},
+	// 		// {"fixed_cost", []float64{500}},
+	// 	},
 	// }
-	// r.Flush()
-
-	// a1, ok1 := all_flows_for_all[0]["cash"]["book"]["yasa"]["value"]["normal"]
-	// a2, ok2 := all_flows_for_all[0]["book"]["book"]["yasa"]["value"]["normal"]
-	// a3, ok3 := all_flows_for_all[0]["service revenue"]["book"]["yasa"]["value"]["normal"]
-	// fmt.Println(a1, ok1)
-	// fmt.Println(a2, ok2)
-	// fmt.Println(a3, ok3)
-
-	point := Managerial_Accounting{
-		cvp: []cvp{
-			{"book1", 10, 1, 15, 5, 0, []float64{0}},
-			{"book2", 10, 0, 15, 5, 0, []float64{0}}},
-		overhead: []overhead{
-			// {"fixed", "units_gap", []float64{0}},
-			{"fixed", "percent_from_sales", []float64{0.1}},
-			// {"portions", []float64{1000}},
-			// {"fixed_cost", []float64{500}},
-		},
-	}
-	j := point.cost_volume_profit_slice()
-	q := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
-	fmt.Fprintln(q, "name\t", "units\t", "selling_price_per_unit\t", "variable_cost_per_unit\t", "fixed_cost\t", "mixed_cost\t", "mixed_cost_per_unit\t", "sales\t", "profit\t", "profit_per_unit\t", "contribution_margin_per_unit\t", "contribution_margin\t", "contribution_margin_ratio\t", "break_even_in_unit\t", "break_even_in_sales\t", "degree_of_operating_leverage\t")
-	for _, i := range j {
-		fmt.Fprintln(q, i.name, "\t", i.units, "\t", i.selling_price_per_unit, "\t", i.variable_cost_per_unit, "\t", i.fixed_cost, "\t", i.mixed_cost, "\t", i.mixed_cost_per_unit, "\t", i.sales, "\t", i.profit, "\t", i.profit_per_unit, "\t", i.contribution_margin_per_unit, "\t", i.contribution_margin, "\t", i.contribution_margin_ratio, "\t", i.break_even_in_unit, "\t", i.break_even_in_sales, "\t", i.degree_of_operating_leverage, "\t")
-	}
-	q.Flush()
+	// j := point.cost_volume_profit_slice()
+	// q := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
+	// fmt.Fprintln(q, "name\t", "units\t", "selling_price_per_unit\t", "variable_cost_per_unit\t", "fixed_cost\t", "mixed_cost\t", "mixed_cost_per_unit\t", "sales\t", "profit\t", "profit_per_unit\t", "contribution_margin_per_unit\t", "contribution_margin\t", "contribution_margin_ratio\t", "break_even_in_unit\t", "break_even_in_sales\t", "degree_of_operating_leverage\t")
+	// for _, i := range j {
+	// 	fmt.Fprintln(q, i.name, "\t", i.units, "\t", i.selling_price_per_unit, "\t", i.variable_cost_per_unit, "\t", i.fixed_cost, "\t", i.mixed_cost, "\t", i.mixed_cost_per_unit, "\t", i.sales, "\t", i.profit, "\t", i.profit_per_unit, "\t", i.contribution_margin_per_unit, "\t", i.contribution_margin, "\t", i.contribution_margin_ratio, "\t", i.break_even_in_unit, "\t", i.break_even_in_sales, "\t", i.degree_of_operating_leverage, "\t")
+	// }
+	// q.Flush()
 }
