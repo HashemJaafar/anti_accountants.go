@@ -515,7 +515,7 @@ func (s Financial_accounting) journal_entry(array_of_entry []Account_value_quant
 
 func (s Financial_accounting) financial_statements(start_date, end_date time.Time, periods int, names []string) ([][]statement, []financial_analysis_statement, []map[string]map[string]map[string]map[string]map[string]float64, []journal_tag) {
 	check_dates(start_date, end_date)
-	d1 := int(end_date.Sub(start_date).Hours() / 24)
+	days := int(end_date.Sub(start_date).Hours() / 24)
 	var journal []journal_tag
 	rows, _ := db.Query("select * from journal order by date,entry_number")
 	for rows.Next() {
@@ -525,7 +525,7 @@ func (s Financial_accounting) financial_statements(start_date, end_date time.Tim
 	}
 	all_values_for_all := []map[string]map[string]map[string]map[string]map[string]float64{}
 	for a := 0; a < periods; a++ {
-		all_values_for_all = append(all_values_for_all, s.all_values(journal, start_date.AddDate(0, 0, -d1*a), end_date.AddDate(0, 0, -d1*a)))
+		all_values_for_all = append(all_values_for_all, s.all_values(journal, start_date.AddDate(0, 0, -days*a), end_date.AddDate(0, 0, -days*a), float64(days)))
 	}
 	var all_analysis []financial_analysis_statement
 	var statements [][]statement
@@ -663,7 +663,7 @@ func (s Financial_accounting) cost_flow(account string, quantity float64, barcod
 	return costs
 }
 
-func (s Financial_accounting) all_values(journal []journal_tag, start_date, end_date time.Time) map[string]map[string]map[string]map[string]map[string]float64 {
+func (s Financial_accounting) all_values(journal []journal_tag, start_date, end_date time.Time, days float64) map[string]map[string]map[string]map[string]map[string]float64 {
 	var one_compound_entry []journal_tag
 	var previous_date string
 	var previous_entry_number int
@@ -773,6 +773,7 @@ func (s Financial_accounting) all_values(journal []journal_tag, start_date, end_
 					map_vpq["flow"] = map_vpq["inflow"] - map_vpq["outflow"]
 					map_vpq["average"] = map_vpq["beginning_balance"] + map_vpq["increase_or_decrease"]/2
 					map_vpq["turnover"] = map_vpq["inflow"] / map_vpq["average"]
+					map_vpq["turnover_days"] = days / map_vpq["turnover"]
 					map_vpq["growth_ratio"] = map_vpq["ending_balance"] / map_vpq["beginning_balance"]
 					map_vpq["percent"] = map_vpq["ending_balance"] /
 						(map_account_flow[key_account_flow][key_name][key_vpq]["beginning_balance"] + map_account_flow[key_account_flow][key_name][key_vpq]["increase"] - map_account_flow[key_account_flow][key_name][key_vpq]["decrease"])
@@ -1694,7 +1695,7 @@ func main() {
 				for keyc, c := range b {
 					for keyd, d := range c {
 						for keye, e := range d {
-							if keya == "cash" && keyd == "value" && keye == "percent" {
+							if keyb == "inventory" && keyd == "value" && keye == "turnover_days" {
 								fmt.Fprintln(r, keya, "\t", keyb, "\t", keyc, "\t", keyd, "\t", keye, "\t", e)
 							}
 						}
@@ -1706,22 +1707,15 @@ func main() {
 	r.Flush()
 
 	a1, ok1 := all_flows_for_all[0]["cash"]["assets"]["yasa"]["value"]["ending_balance"]
-	a2, ok2 := all_flows_for_all[0]["cash"]["cash"]["yasa"]["value"]["ending_balance"]
-	a3, ok3 := all_flows_for_all[0]["cash"]["tax"]["yasa"]["value"]["ending_balance"]
+	// a2, ok2 := all_flows_for_all[0]["cash"]["cash"]["yasa"]["value"]["ending_balance"]
+	// a3, ok3 := all_flows_for_all[0]["cash"]["tax"]["yasa"]["value"]["ending_balance"]
 	fmt.Println(a1, ok1)
-	fmt.Println(a2, ok2)
-	fmt.Println(a3, ok3)
+	// fmt.Println(a2, ok2)
+	// fmt.Println(a3, ok3)
 
 	// point := Managerial_Accounting{
-	// 	cvp: []cvp{
-	// 		{"book1", 10, 1, 15, 5, 0, []float64{0}},
-	// 		{"book2", 10, 0, 15, 5, 0, []float64{0}}},
-	// 	overhead: []overhead{
-	// 		// {"fixed", "units_gap", []float64{0}},
-	// 		{"fixed", "percent_from_sales", []float64{0.1}},
-	// 		// {"portions", []float64{1000}},
-	// 		// {"fixed_cost", []float64{500}},
-	// 	},
+	// 	cvp:      []cvp{{"falafel", 1000, 0, 1250, 500, 0, []float64{0}}},
+	// 	overhead: []overhead{{"fixed", "units", []float64{300000 / 12, 8000 * 10, 100000}}},
 	// }
 	// j := point.cost_volume_profit_slice()
 	// q := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
