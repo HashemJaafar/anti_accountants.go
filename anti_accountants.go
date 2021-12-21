@@ -94,16 +94,6 @@ type journal_tag struct {
 	reverse       bool
 }
 
-type statement struct {
-	account string
-	value_ending_balance, value_beginning_balance, value_average, value_increase, value_decrease, value_increase_or_decrease, value_inflow,
-	value_outflow, value_flow, value_growth_ratio, value_turnover, value_percent, value_change_since_base_period, value_growth_ratio_to_base_period,
-	price_ending_balance, price_beginning_balance, price_average, price_increase, price_decrease, price_increase_or_decrease, price_inflow,
-	price_outflow, price_flow, price_growth_ratio, price_turnover, price_percent, price_change_since_base_period, price_growth_ratio_to_base_period,
-	quantity_ending_balance, quantity_beginning_balance, quantity_average, quantity_increase, quantity_decrease, quantity_increase_or_decrease, quantity_inflow,
-	quantity_outflow, quantity_flow, quantity_growth_ratio, quantity_turnover, quantity_percent, quantity_change_since_base_period, quantity_growth_ratio_to_base_period float64
-}
-
 type financial_analysis struct {
 	current_assets, current_liabilities, cash, short_term_investments, net_receivables, net_credit_sales,
 	average_net_receivables, cost_of_goods_sold, average_inventory, net_income, net_sales, average_assets, average_equity,
@@ -513,7 +503,7 @@ func (s Financial_accounting) journal_entry(array_of_entry []Account_value_quant
 	return array_to_insert
 }
 
-func (s Financial_accounting) financial_statements(start_date, end_date time.Time, periods int, names []string) ([][]statement, []financial_analysis_statement, []map[string]map[string]map[string]map[string]map[string]float64, []journal_tag) {
+func (s Financial_accounting) financial_statements(start_date, end_date time.Time, periods int, names []string) ([]map[string]map[string]map[string]map[string]map[string]float64, []financial_analysis_statement, []journal_tag) {
 	check_dates(start_date, end_date)
 	days := int(end_date.Sub(start_date).Hours() / 24)
 	var journal []journal_tag
@@ -523,25 +513,24 @@ func (s Financial_accounting) financial_statements(start_date, end_date time.Tim
 		rows.Scan(&entry.date, &entry.entry_number, &entry.account, &entry.value, &entry.price, &entry.quantity, &entry.barcode, &entry.entry_expair, &entry.description, &entry.name, &entry.employee_name, &entry.entry_date, &entry.reverse)
 		journal = append(journal, entry)
 	}
-	all_statements := []map[string]map[string]map[string]map[string]map[string]float64{}
+	statements := []map[string]map[string]map[string]map[string]map[string]float64{}
 	for a := 0; a < periods; a++ {
-		statement := s.all_values(journal, start_date.AddDate(0, 0, -days*a), end_date.AddDate(0, 0, -days*a))
+		statement := s.statement(journal, start_date.AddDate(0, 0, -days*a), end_date.AddDate(0, 0, -days*a))
 		statement = s.sum_1st_column(statement)
 		statement = s.sum_2nd_column(statement)
 		sum_3rd_column(statement, names)
 		vertical_analysis(statement, float64(days))
-		all_statements = append(all_statements, statement)
+		statements = append(statements, statement)
 	}
 	var all_analysis []financial_analysis_statement
-	var statements [][]statement
-	for _, statement_current := range all_statements {
-		horizontal_analysis(statement_current, all_statements[periods-1])
+	for _, statement_current := range statements {
+		horizontal_analysis(statement_current, statements[periods-1])
 		s.prepare_statement(statement_current)
 		calculate_price(statement_current)
 		analysis := s.analysis(statement_current)
 		all_analysis = append(all_analysis, analysis)
 	}
-	return statements, all_analysis, all_statements, journal
+	return statements, all_analysis, journal
 }
 
 func (s Financial_accounting) invoice(array_of_journal_tag []journal_tag) []invoice_struct {
@@ -670,7 +659,7 @@ func (s Financial_accounting) cost_flow(account string, quantity float64, barcod
 	return costs
 }
 
-func (s Financial_accounting) all_values(journal []journal_tag, start_date, end_date time.Time) map[string]map[string]map[string]map[string]map[string]float64 {
+func (s Financial_accounting) statement(journal []journal_tag, start_date, end_date time.Time) map[string]map[string]map[string]map[string]map[string]float64 {
 	var one_compound_entry []journal_tag
 	var previous_date string
 	var previous_entry_number int
@@ -1597,31 +1586,10 @@ func main() {
 	// }
 	// r.Flush()
 
-	balance_sheet, financial_analysis_statement, all_flows_for_all, _ := i.financial_statements(
+	all_flows_for_all, financial_analysis_statement, _ := i.financial_statements(
 		time.Date(2020, time.January, 1, 0, 0, 0, 0, time.Local),
 		time.Date(2022, time.January, 1, 0, 0, 0, 0, time.Local),
 		2, []string{})
-	w := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
-	fmt.Fprintln(w, "index\t", "account\t",
-		// "value_ending_balance\t", "value_average\t", "value_increase\t", "value_decrease\t", "value_increase_or_decrease\t", "value_inflow\t",
-		"value_outflow\t", "value_flow\t", "value_turnover\t", "value_percent\t", "value_change_since_base_period\t", "value_growth_ratio_to_base_period\t",
-		// "price_ending_balance\t", "price_average\t", "price_increase\t", "price_decrease\t", "price_increase_or_decrease\t", "price_inflow\t",
-		// "price_outflow\t", "price_flow\t", "price_turnover\t", "price_percent\t", "price_change_since_base_period\t", "price_growth_ratio_to_base_period\t",
-		// "quantity_ending_balance\t", "quantity_average\t", "quantity_increase\t", "quantity_decrease\t", "quantity_increase_or_decrease\t", "quantity_inflow\t",
-		"quantity_outflow\t", "quantity_flow\t", "quantity_turnover\t", "quantity_percent\t", "quantity_change_since_base_period\t", "quantity_growth_ratio_to_base_period\t")
-	for index, a := range balance_sheet {
-		for _, b := range a {
-			fmt.Fprintln(w, index, "\t", b.account, "\t",
-				// b.value_ending_balance, "\t", b.value_average, "\t", b.value_increase, "\t", b.value_decrease, "\t", b.value_increase_or_decrease, "\t", b.value_inflow, "\t",
-				b.value_outflow, "\t", b.value_flow, "\t", b.value_turnover, "\t", b.value_percent, "\t", b.value_change_since_base_period, "\t", b.value_growth_ratio_to_base_period, "\t",
-				// b.price_ending_balance, "\t", b.price_average, "\t", b.price_increase, "\t", b.price_decrease, "\t", b.price_increase_or_decrease, "\t", b.price_inflow, "\t",
-				// b.price_outflow, "\t", b.price_flow, "\t", b.price_turnover, "\t", b.price_percent, "\t", b.price_change_since_base_period, "\t", b.price_growth_ratio_to_base_period, "\t",
-				// b.quantity_ending_balance, "\t", b.quantity_average, "\t", b.quantity_increase, "\t", b.quantity_decrease, "\t", b.quantity_increase_or_decrease, "\t", b.quantity_inflow, "\t",
-				b.quantity_outflow, "\t", b.quantity_flow, "\t", b.quantity_turnover, "\t", b.quantity_percent, "\t", b.quantity_change_since_base_period, "\t", b.quantity_growth_ratio_to_base_period, "\t")
-		}
-		fmt.Fprintln(w, "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t")
-	}
-	// w.Flush()
 
 	// t := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
 	// fmt.Fprintln(t, "date\t", "entry_number\t", "account\t", "value\t", "price\t", "quantity\t", "barcode\t", "entry_expair\t", "description\t", "name\t", "employee_name\t", "entry_date\t", "reverse")
