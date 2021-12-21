@@ -523,18 +523,25 @@ func (s Financial_accounting) financial_statements(start_date, end_date time.Tim
 		rows.Scan(&entry.date, &entry.entry_number, &entry.account, &entry.value, &entry.price, &entry.quantity, &entry.barcode, &entry.entry_expair, &entry.description, &entry.name, &entry.employee_name, &entry.entry_date, &entry.reverse)
 		journal = append(journal, entry)
 	}
-	all_values_for_all := []map[string]map[string]map[string]map[string]map[string]float64{}
+	all_statements := []map[string]map[string]map[string]map[string]map[string]float64{}
 	for a := 0; a < periods; a++ {
-		all_values_for_all = append(all_values_for_all, s.all_values(journal, start_date.AddDate(0, 0, -days*a), end_date.AddDate(0, 0, -days*a), float64(days)))
+		statement := s.all_values(journal, start_date.AddDate(0, 0, -days*a), end_date.AddDate(0, 0, -days*a))
+		statement = s.sum_1st_column(statement)
+		statement = s.sum_2nd_column(statement)
+		sum_3rd_column(statement, names)
+		vertical_analysis(statement, float64(days))
+		all_statements = append(all_statements, statement)
 	}
 	var all_analysis []financial_analysis_statement
 	var statements [][]statement
-	for _, a := range all_values_for_all {
-		statement, analysis := s.prepare_statement(a, all_values_for_all[periods-1], names)
-		statements = append(statements, statement)
+	for _, statement_current := range all_statements {
+		horizontal_analysis(statement_current, all_statements[periods-1])
+		s.prepare_statement(statement_current)
+		calculate_price(statement_current)
+		analysis := s.analysis(statement_current)
 		all_analysis = append(all_analysis, analysis)
 	}
-	return statements, all_analysis, all_values_for_all, journal
+	return statements, all_analysis, all_statements, journal
 }
 
 func (s Financial_accounting) invoice(array_of_journal_tag []journal_tag) []invoice_struct {
@@ -663,18 +670,18 @@ func (s Financial_accounting) cost_flow(account string, quantity float64, barcod
 	return costs
 }
 
-func (s Financial_accounting) all_values(journal []journal_tag, start_date, end_date time.Time, days float64) map[string]map[string]map[string]map[string]map[string]float64 {
+func (s Financial_accounting) all_values(journal []journal_tag, start_date, end_date time.Time) map[string]map[string]map[string]map[string]map[string]float64 {
 	var one_compound_entry []journal_tag
 	var previous_date string
 	var previous_entry_number int
 	var date time.Time
-	all_flows := map[string]map[string]map[string]map[string]map[string]float64{}
-	all_nan_flow := map[string]map[string]map[string]map[string]float64{}
+	statement := map[string]map[string]map[string]map[string]map[string]float64{}
+	nan_flow_statement := map[string]map[string]map[string]map[string]float64{}
 	for _, entry := range journal {
 		date = s.parse_date(entry.date)
 		if previous_date != entry.date || previous_entry_number != entry.entry_number {
-			s.sum_flow(date, start_date, one_compound_entry, all_flows)
-			s.sum_values(date, start_date, one_compound_entry, all_nan_flow)
+			s.sum_flow(date, start_date, one_compound_entry, statement)
+			s.sum_values(date, start_date, one_compound_entry, nan_flow_statement)
 			one_compound_entry = []journal_tag{}
 		}
 		if date.Before(end_date) {
@@ -683,156 +690,81 @@ func (s Financial_accounting) all_values(journal []journal_tag, start_date, end_
 		previous_date = entry.date
 		previous_entry_number = entry.entry_number
 	}
-	s.sum_flow(date, start_date, one_compound_entry, all_flows)
-	s.sum_values(date, start_date, one_compound_entry, all_nan_flow)
+	s.sum_flow(date, start_date, one_compound_entry, statement)
+	s.sum_values(date, start_date, one_compound_entry, nan_flow_statement)
 
-	all_values1 := map[string]map[string]map[string]map[string]map[string]float64{}
-	for key_account_flow, _ := range all_nan_flow {
-		if all_values1[key_account_flow] == nil {
-			all_values1[key_account_flow] = map[string]map[string]map[string]map[string]float64{}
+	for key_account_flow, _ := range nan_flow_statement {
+		if statement[key_account_flow] == nil {
+			statement[key_account_flow] = map[string]map[string]map[string]map[string]float64{}
 		}
-		for key_account, map_account := range all_nan_flow {
-			if all_values1[key_account_flow][key_account] == nil {
-				all_values1[key_account_flow][key_account] = map[string]map[string]map[string]float64{}
+		for key_account, map_account := range nan_flow_statement {
+			if statement[key_account_flow][key_account] == nil {
+				statement[key_account_flow][key_account] = map[string]map[string]map[string]float64{}
 			}
 			for key_name, map_name := range map_account {
-				if all_values1[key_account_flow][key_account][key_name] == nil {
-					all_values1[key_account_flow][key_account][key_name] = map[string]map[string]float64{}
+				if statement[key_account_flow][key_account][key_name] == nil {
+					statement[key_account_flow][key_account][key_name] = map[string]map[string]float64{}
 				}
 				for key_vpq, map_vpq := range map_name {
-					if all_values1[key_account_flow][key_account][key_name][key_vpq] == nil {
-						all_values1[key_account_flow][key_account][key_name][key_vpq] = map[string]float64{}
+					if statement[key_account_flow][key_account][key_name][key_vpq] == nil {
+						statement[key_account_flow][key_account][key_name][key_vpq] = map[string]float64{}
 					}
 					for key_number, _ := range map_vpq {
-						all_values1[key_account_flow][key_account][key_name][key_vpq][key_number] = map_vpq[key_number]
-						all_values1[key_account_flow][key_account][key_name][key_vpq]["inflow"] = all_flows[key_account_flow][key_account][key_name][key_vpq]["inflow"]
-						all_values1[key_account_flow][key_account][key_name][key_vpq]["outflow"] = all_flows[key_account_flow][key_account][key_name][key_vpq]["outflow"]
+						statement[key_account_flow][key_account][key_name][key_vpq][key_number] = map_vpq[key_number]
 					}
 				}
 			}
 		}
 	}
-
-	new_all_values := map[string]map[string]map[string]map[string]map[string]float64{}
-	for key_account_flow, map_account_flow := range all_values1 {
-		if new_all_values[key_account_flow] == nil {
-			new_all_values[key_account_flow] = map[string]map[string]map[string]map[string]float64{}
-		}
-		for key_account, map_account := range map_account_flow {
-			var last_name string
-			key1 := key_account
-			for {
-				for _, ss := range s.accounts {
-					if ss.name == key_account {
-						key_account = ss.father
-						if new_all_values[key_account_flow][ss.name] == nil {
-							new_all_values[key_account_flow][ss.name] = map[string]map[string]map[string]float64{}
-						}
-						for key_name, map_name := range map_account {
-							if new_all_values[key_account_flow][ss.name][key_name] == nil {
-								new_all_values[key_account_flow][ss.name][key_name] = map[string]map[string]float64{}
-							}
-							for key_vpq, map_vpq := range map_name {
-								if new_all_values[key_account_flow][ss.name][key_name][key_vpq] == nil {
-									new_all_values[key_account_flow][ss.name][key_name][key_vpq] = map[string]float64{}
-								}
-								for key_number, number := range map_vpq {
-									switch {
-									case !is_in(key_number, []string{"inflow", "outflow"}):
-										if s.is_credit(key1) == s.is_credit(ss.name) {
-											new_all_values[key_account_flow][ss.name][key_name][key_vpq][key_number] += number
-										} else {
-											new_all_values[key_account_flow][ss.name][key_name][key_vpq][key_number] -= number
-										}
-									case key_account_flow != key1:
-										new_all_values[key_account_flow][ss.name][key_name][key_vpq][key_number] += number
-									case key_account_flow == ss.name:
-										new_all_values[key_account_flow][key1][key_name][key_vpq][key_number] += number
-									}
-								}
-							}
-						}
-					}
-				}
-				if last_name == key_account {
-					break
-				}
-				last_name = key_account
-			}
-		}
-	}
-	for key_account_flow, map_account_flow := range new_all_values {
-		for _, map_account := range map_account_flow {
-			for key_name, map_name := range map_account {
-				if map_name["price"] == nil {
-					map_name["price"] = map[string]float64{}
-				}
-				for key_vpq, map_vpq := range map_name {
-					map_vpq["increase_or_decrease"] = map_vpq["increase"] - map_vpq["decrease"]
-					map_vpq["ending_balance"] = map_vpq["beginning_balance"] + map_vpq["increase_or_decrease"]
-					map_vpq["flow"] = map_vpq["inflow"] - map_vpq["outflow"]
-					map_vpq["average"] = map_vpq["beginning_balance"] + map_vpq["increase_or_decrease"]/2
-					map_vpq["turnover"] = map_vpq["inflow"] / map_vpq["average"]
-					map_vpq["turnover_days"] = days / map_vpq["turnover"]
-					map_vpq["growth_ratio"] = map_vpq["ending_balance"] / map_vpq["beginning_balance"]
-					map_vpq["percent"] = map_vpq["ending_balance"] /
-						(map_account_flow[key_account_flow][key_name][key_vpq]["beginning_balance"] + map_account_flow[key_account_flow][key_name][key_vpq]["increase"] - map_account_flow[key_account_flow][key_name][key_vpq]["decrease"])
-					for key_number, _ := range map_vpq {
-						map_name["price"][key_number] = map_name["value"][key_number] / map_name["quantity"][key_number]
-					}
-				}
-			}
-		}
-	}
-	return new_all_values
+	return statement
 }
 
-func (s Financial_accounting) sum_values(date, start_date time.Time, one_compound_entry []journal_tag, all_flows map[string]map[string]map[string]map[string]float64) {
+func (s Financial_accounting) sum_values(date, start_date time.Time, one_compound_entry []journal_tag, nan_flow_statement map[string]map[string]map[string]map[string]float64) {
 	for _, b := range one_compound_entry {
-		if all_flows[b.account] == nil {
-			all_flows[b.account] = map[string]map[string]map[string]float64{}
+		if nan_flow_statement[b.account] == nil {
+			nan_flow_statement[b.account] = map[string]map[string]map[string]float64{}
 		}
-		if all_flows[b.account][b.name] == nil {
-			all_flows[b.account][b.name] = map[string]map[string]float64{}
+		if nan_flow_statement[b.account][b.name] == nil {
+			nan_flow_statement[b.account][b.name] = map[string]map[string]float64{}
 		}
-		if all_flows[b.account][b.name]["value"] == nil {
-			all_flows[b.account][b.name]["value"] = map[string]float64{}
+		if nan_flow_statement[b.account][b.name]["value"] == nil {
+			nan_flow_statement[b.account][b.name]["value"] = map[string]float64{}
 		}
-		if all_flows[b.account][b.name]["quantity"] == nil {
-			all_flows[b.account][b.name]["quantity"] = map[string]float64{}
+		if nan_flow_statement[b.account][b.name]["quantity"] == nil {
+			nan_flow_statement[b.account][b.name]["quantity"] = map[string]float64{}
 		}
-		if all_flows[s.retained_earnings] == nil {
-			all_flows[s.retained_earnings] = map[string]map[string]map[string]float64{}
+		if nan_flow_statement[s.retained_earnings] == nil {
+			nan_flow_statement[s.retained_earnings] = map[string]map[string]map[string]float64{}
 		}
-		if all_flows[s.retained_earnings][b.name] == nil {
-			all_flows[s.retained_earnings][b.name] = map[string]map[string]float64{}
+		if nan_flow_statement[s.retained_earnings][b.name] == nil {
+			nan_flow_statement[s.retained_earnings][b.name] = map[string]map[string]float64{}
 		}
-		if all_flows[s.retained_earnings][b.name]["value"] == nil {
-			all_flows[s.retained_earnings][b.name]["value"] = map[string]float64{}
+		if nan_flow_statement[s.retained_earnings][b.name]["value"] == nil {
+			nan_flow_statement[s.retained_earnings][b.name]["value"] = map[string]float64{}
 		}
-		if all_flows[s.retained_earnings][b.name]["quantity"] == nil {
-			all_flows[s.retained_earnings][b.name]["quantity"] = map[string]float64{}
+		if nan_flow_statement[s.retained_earnings][b.name]["quantity"] == nil {
+			nan_flow_statement[s.retained_earnings][b.name]["quantity"] = map[string]float64{}
 		}
 		if date.Before(start_date) {
 			switch {
 			case s.is_father(s.retained_earnings, b.account) && s.is_credit(b.account):
-				all_flows[s.retained_earnings][b.name]["value"]["beginning_balance"] += b.value
-				all_flows[s.retained_earnings][b.name]["quantity"]["beginning_balance"] += b.quantity
+				nan_flow_statement[s.retained_earnings][b.name]["value"]["beginning_balance"] += b.value
+				nan_flow_statement[s.retained_earnings][b.name]["quantity"]["beginning_balance"] += b.quantity
 			case s.is_father(s.retained_earnings, b.account) && !s.is_credit(b.account):
-				all_flows[s.retained_earnings][b.name]["value"]["beginning_balance"] -= b.value
-				all_flows[s.retained_earnings][b.name]["quantity"]["beginning_balance"] -= b.quantity
+				nan_flow_statement[s.retained_earnings][b.name]["value"]["beginning_balance"] -= b.value
+				nan_flow_statement[s.retained_earnings][b.name]["quantity"]["beginning_balance"] -= b.quantity
 			default:
-				all_flows[b.account][b.name]["value"]["beginning_balance"] += b.value
-				all_flows[b.account][b.name]["quantity"]["beginning_balance"] += b.quantity
+				nan_flow_statement[b.account][b.name]["value"]["beginning_balance"] += b.value
+				nan_flow_statement[b.account][b.name]["quantity"]["beginning_balance"] += b.quantity
 			}
 		}
 		if date.After(start_date) {
 			if b.value >= 0 {
-				all_flows[b.account][b.name]["value"]["increase"] += math.Abs(b.value)
-				all_flows[b.account][b.name]["quantity"]["increase"] += math.Abs(b.quantity)
+				nan_flow_statement[b.account][b.name]["value"]["increase"] += math.Abs(b.value)
+				nan_flow_statement[b.account][b.name]["quantity"]["increase"] += math.Abs(b.quantity)
 			} else {
-				all_flows[b.account][b.name]["value"]["decrease"] += math.Abs(b.value)
-				all_flows[b.account][b.name]["quantity"]["decrease"] += math.Abs(b.quantity)
+				nan_flow_statement[b.account][b.name]["value"]["decrease"] += math.Abs(b.value)
+				nan_flow_statement[b.account][b.name]["quantity"]["decrease"] += math.Abs(b.quantity)
 			}
 		}
 	}
@@ -867,153 +799,55 @@ func (s Financial_accounting) sum_flow(date, start_date time.Time, one_compound_
 	}
 }
 
-func (s Financial_accounting) prepare_statement(statement_map, statement_map_base map[string]map[string]map[string]map[string]map[string]float64, names []string) ([]statement, financial_analysis_statement) {
-	new_statement_map_base := s.sum_and_extract_new_map(statement_map_base, names, s.cash_and_cash_equivalents)
-	new_statement_map_cash := s.sum_and_extract_new_map(statement_map, names, s.cash_and_cash_equivalents)
-	new_statement_map_sales := s.sum_and_extract_new_map(statement_map, names, s.sales)
-	new_statement_map_cost_of_goods_sold := s.sum_and_extract_new_map(statement_map, names, s.cost_of_goods_sold)
-
-	analysis := financial_analysis{
-		current_assets:                      new_statement_map_cash[s.current_assets]["value"]["ending_balance"],
-		current_liabilities:                 new_statement_map_cash[s.current_liabilities]["value"]["ending_balance"],
-		cash:                                new_statement_map_cash[s.cash_and_cash_equivalents]["value"]["ending_balance"],
-		short_term_investments:              new_statement_map_cash[s.short_term_investments]["value"]["ending_balance"],
-		net_receivables:                     new_statement_map_cash[s.receivables]["value"]["ending_balance"],
-		net_credit_sales:                    new_statement_map_sales[s.receivables]["value"]["flow"],
-		average_net_receivables:             new_statement_map_cash[s.receivables]["value"]["average"],
-		cost_of_goods_sold:                  new_statement_map_cash[s.cost_of_goods_sold]["value"]["ending_balance"],
-		average_inventory:                   new_statement_map_cash[s.inventory]["value"]["average"],
-		net_income:                          new_statement_map_cash[s.income_statement]["value"]["ending_balance"],
-		net_sales:                           new_statement_map_cash[s.sales]["value"]["ending_balance"],
-		average_assets:                      new_statement_map_cash[s.assets]["value"]["average"],
-		average_equity:                      new_statement_map_cash[s.equity]["value"]["average"],
-		preferred_dividends:                 0,
-		average_common_stockholders_equity:  0,
-		market_price_per_shares_outstanding: 0,
-		cash_dividends:                      new_statement_map_cash[s.dividends]["value"]["flow"],
-		total_debt:                          new_statement_map_cash[s.liabilities]["value"]["ending_balance"],
-		total_assets:                        new_statement_map_cash[s.assets]["value"]["ending_balance"],
-		ebitda:                              new_statement_map_cash[s.ebitda]["value"]["ending_balance"],
-		interest_expense:                    new_statement_map_cash[s.interest_expense]["value"]["ending_balance"],
-		weighted_average_common_shares_outstanding: 0,
-	}.financial_analysis_statement()
-
-	value_total_assets := new_statement_map_cash[s.assets]["value"]["ending_balance"]
-	price_total_assets := new_statement_map_cash[s.assets]["price"]["ending_balance"]
-	quantity_total_assets := new_statement_map_cash[s.assets]["quantity"]["ending_balance"]
-	value_total_sales := new_statement_map_cash[s.sales]["value"]["ending_balance"]
-	price_total_sales := new_statement_map_cash[s.sales]["price"]["ending_balance"]
-	quantity_total_sales := new_statement_map_cash[s.sales]["quantity"]["ending_balance"]
-
-	var value_total, price_total, quantity_total float64
-	var value_turnover, price_turnover, quantity_turnover float64
-	var statement_sheet []statement
-
-	for key_account, map_account := range new_statement_map_cash {
-		var okeys []bool
-		for _, map_vpq := range map_account {
-			for _, number := range map_vpq {
-				if number == 0 {
-					okeys = append(okeys, false)
-				} else if math.IsNaN(number) {
-					okeys = append(okeys, false)
-				} else {
-					okeys = append(okeys, true)
+func (s Financial_accounting) prepare_statement(statement map[string]map[string]map[string]map[string]map[string]float64) {
+	for key_account_flow, map_account_flow := range statement {
+		if key_account_flow == s.cash_and_cash_equivalents {
+			if statement["financial_statement"] == nil {
+				statement["financial_statement"] = map[string]map[string]map[string]map[string]float64{}
+			}
+			for key_account, map_account := range map_account_flow {
+				if statement["financial_statement"][key_account] == nil {
+					statement["financial_statement"][key_account] = map[string]map[string]map[string]float64{}
+				}
+				for key_name, map_name := range map_account {
+					if statement["financial_statement"][key_account][key_name] == nil {
+						statement["financial_statement"][key_account][key_name] = map[string]map[string]float64{}
+					}
+					for key_vpq, map_vpq := range map_name {
+						if statement["financial_statement"][key_account][key_name][key_vpq] == nil {
+							statement["financial_statement"][key_account][key_name][key_vpq] = map[string]float64{}
+						}
+						for key_number, number := range map_vpq {
+							statement["financial_statement"][key_account][key_name][key_vpq][key_number] = number
+							if !s.is_father(s.income_statement, key_account) {
+								statement["financial_statement"][key_account][key_name][key_vpq]["percent"] = statement[s.income_statement][key_account][key_name][key_vpq]["percent"]
+							} else {
+								statement["financial_statement"][key_account][key_name][key_vpq]["percent"] = statement[s.assets][key_account][key_name][key_vpq]["percent"]
+							}
+							switch {
+							case s.is_father(s.inventory, key_account):
+								statement["financial_statement"][key_account][key_name][key_vpq]["turnover"] = statement[s.cost_of_goods_sold][key_account][key_name][key_vpq]["turnover"]
+								statement["financial_statement"][key_account][key_name][key_vpq]["turnover_days"] = statement[s.cost_of_goods_sold][key_account][key_name][key_vpq]["turnover_days"]
+							case s.is_father(s.assets, key_account):
+								statement["financial_statement"][key_account][key_name][key_vpq]["turnover"] = statement[s.sales][key_account][key_name][key_vpq]["turnover"]
+								statement["financial_statement"][key_account][key_name][key_vpq]["turnover_days"] = statement[s.sales][key_account][key_name][key_vpq]["turnover_days"]
+							}
+						}
+					}
 				}
 			}
 		}
-		var ok bool
-		for _, a := range okeys {
-			if a {
-				ok = true
-			}
-		}
-		if !ok {
-			continue
-		}
-
-		if !s.is_father(s.income_statement, key_account) {
-			value_total = value_total_assets
-			price_total = price_total_assets
-			quantity_total = quantity_total_assets
-		} else {
-			value_total = value_total_sales
-			price_total = price_total_sales
-			quantity_total = quantity_total_sales
-		}
-		switch {
-		case s.is_father(s.inventory, key_account):
-			value_turnover = new_statement_map_cost_of_goods_sold[key_account]["value"]["turnover"]
-			price_turnover = new_statement_map_cost_of_goods_sold[key_account]["price"]["turnover"]
-			quantity_turnover = new_statement_map_cost_of_goods_sold[key_account]["quantity"]["turnover"]
-		case s.is_father(s.assets, key_account):
-			value_turnover = new_statement_map_sales[key_account]["value"]["turnover"]
-			price_turnover = new_statement_map_sales[key_account]["price"]["turnover"]
-			quantity_turnover = new_statement_map_sales[key_account]["quantity"]["turnover"]
-		default:
-			value_turnover = new_statement_map_cash[key_account]["value"]["turnover"]
-			price_turnover = new_statement_map_cash[key_account]["price"]["turnover"]
-			quantity_turnover = new_statement_map_cash[key_account]["quantity"]["turnover"]
-		}
-
-		statement_sheet = append(statement_sheet, statement{
-			account:                              key_account,
-			value_ending_balance:                 map_account["value"]["ending_balance"],
-			value_beginning_balance:              map_account["value"]["beginning_balance"],
-			value_average:                        map_account["value"]["average"],
-			value_increase:                       map_account["value"]["increase"],
-			value_decrease:                       map_account["value"]["decrease"],
-			value_increase_or_decrease:           map_account["value"]["increase_or_decrease"],
-			value_inflow:                         map_account["value"]["inflow"],
-			value_outflow:                        map_account["value"]["outflow"],
-			value_flow:                           map_account["value"]["flow"],
-			value_growth_ratio:                   map_account["value"]["growth_ratio"],
-			value_turnover:                       value_turnover,
-			value_percent:                        map_account["value"]["ending_balance"] / value_total,
-			value_change_since_base_period:       map_account["value"]["ending_balance"] - new_statement_map_base[key_account]["value"]["ending_balance"],
-			value_growth_ratio_to_base_period:    map_account["value"]["ending_balance"] / new_statement_map_base[key_account]["value"]["ending_balance"],
-			price_ending_balance:                 map_account["price"]["ending_balance"],
-			price_beginning_balance:              map_account["price"]["beginning_balance"],
-			price_average:                        map_account["price"]["average"],
-			price_increase:                       map_account["price"]["increase"],
-			price_decrease:                       map_account["price"]["decrease"],
-			price_increase_or_decrease:           map_account["price"]["increase_or_decrease"],
-			price_inflow:                         map_account["price"]["inflow"],
-			price_outflow:                        map_account["price"]["outflow"],
-			price_flow:                           map_account["price"]["flow"],
-			price_growth_ratio:                   map_account["price"]["growth_ratio"],
-			price_turnover:                       price_turnover,
-			price_percent:                        map_account["price"]["ending_balance"] / price_total,
-			price_change_since_base_period:       map_account["price"]["ending_balance"] - new_statement_map_base[key_account]["price"]["ending_balance"],
-			price_growth_ratio_to_base_period:    map_account["price"]["ending_balance"] / new_statement_map_base[key_account]["price"]["ending_balance"],
-			quantity_ending_balance:              map_account["quantity"]["ending_balance"],
-			quantity_beginning_balance:           map_account["quantity"]["beginning_balance"],
-			quantity_average:                     map_account["quantity"]["average"],
-			quantity_increase:                    map_account["quantity"]["increase"],
-			quantity_decrease:                    map_account["quantity"]["decrease"],
-			quantity_increase_or_decrease:        map_account["quantity"]["increase_or_decrease"],
-			quantity_inflow:                      map_account["quantity"]["inflow"],
-			quantity_outflow:                     map_account["quantity"]["outflow"],
-			quantity_flow:                        map_account["quantity"]["flow"],
-			quantity_growth_ratio:                map_account["quantity"]["growth_ratio"],
-			quantity_turnover:                    quantity_turnover,
-			quantity_percent:                     map_account["quantity"]["ending_balance"] / quantity_total,
-			quantity_change_since_base_period:    map_account["quantity"]["ending_balance"] - new_statement_map_base[key_account]["quantity"]["ending_balance"],
-			quantity_growth_ratio_to_base_period: map_account["quantity"]["ending_balance"] / new_statement_map_base[key_account]["quantity"]["ending_balance"],
-		})
 	}
-
-	var indexa int
-	for _, a := range s.accounts {
-		for indexb, b := range statement_sheet {
-			if a.name == b.account {
-				statement_sheet[indexa], statement_sheet[indexb] = statement_sheet[indexb], statement_sheet[indexa]
-				indexa++
-				break
-			}
-		}
-	}
-	return statement_sheet, analysis
+	// var indexa int
+	// for _, a := range s.accounts {
+	// 	for indexb, b := range statement_sheet {
+	// 		if a.name == b.account {
+	// 			statement_sheet[indexa], statement_sheet[indexb] = statement_sheet[indexb], statement_sheet[indexa]
+	// 			indexa++
+	// 			break
+	// 		}
+	// 	}
+	// }
 }
 
 func (s Financial_accounting) parse_date(string_date string) time.Time {
@@ -1093,43 +927,69 @@ func (s Financial_accounting) check_debit_equal_credit(array_of_entry []Account_
 	}
 }
 
-func (s Financial_accounting) sum_and_extract_new_map(statement_map map[string]map[string]map[string]map[string]map[string]float64, name []string, flow_account string) map[string]map[string]map[string]float64 {
+func (s Financial_accounting) analysis(statement map[string]map[string]map[string]map[string]map[string]float64) financial_analysis_statement {
+	return financial_analysis{
+		current_assets:                      statement[s.cash_and_cash_equivalents][s.current_assets]["names"]["value"]["ending_balance"],
+		current_liabilities:                 statement[s.cash_and_cash_equivalents][s.current_liabilities]["names"]["value"]["ending_balance"],
+		cash:                                statement[s.cash_and_cash_equivalents][s.cash_and_cash_equivalents]["names"]["value"]["ending_balance"],
+		short_term_investments:              statement[s.cash_and_cash_equivalents][s.short_term_investments]["names"]["value"]["ending_balance"],
+		net_receivables:                     statement[s.cash_and_cash_equivalents][s.receivables]["names"]["value"]["ending_balance"],
+		net_credit_sales:                    statement[s.sales][s.receivables]["names"]["value"]["flow"],
+		average_net_receivables:             statement[s.cash_and_cash_equivalents][s.receivables]["names"]["value"]["average"],
+		cost_of_goods_sold:                  statement[s.cash_and_cash_equivalents][s.cost_of_goods_sold]["names"]["value"]["ending_balance"],
+		average_inventory:                   statement[s.cash_and_cash_equivalents][s.inventory]["names"]["value"]["average"],
+		net_income:                          statement[s.cash_and_cash_equivalents][s.income_statement]["names"]["value"]["ending_balance"],
+		net_sales:                           statement[s.cash_and_cash_equivalents][s.sales]["names"]["value"]["ending_balance"],
+		average_assets:                      statement[s.cash_and_cash_equivalents][s.assets]["names"]["value"]["average"],
+		average_equity:                      statement[s.cash_and_cash_equivalents][s.equity]["names"]["value"]["average"],
+		preferred_dividends:                 0,
+		average_common_stockholders_equity:  0,
+		market_price_per_shares_outstanding: 0,
+		cash_dividends:                      statement[s.cash_and_cash_equivalents][s.dividends]["names"]["value"]["flow"],
+		total_debt:                          statement[s.cash_and_cash_equivalents][s.liabilities]["names"]["value"]["ending_balance"],
+		total_assets:                        statement[s.cash_and_cash_equivalents][s.assets]["names"]["value"]["ending_balance"],
+		ebitda:                              statement[s.cash_and_cash_equivalents][s.ebitda]["names"]["value"]["ending_balance"],
+		interest_expense:                    statement[s.cash_and_cash_equivalents][s.interest_expense]["names"]["value"]["ending_balance"],
+		weighted_average_common_shares_outstanding: 0,
+	}.financial_analysis_statement()
+}
+
+func (s Financial_accounting) sum_1st_column(statement map[string]map[string]map[string]map[string]map[string]float64) map[string]map[string]map[string]map[string]map[string]float64 {
+	new_statement := map[string]map[string]map[string]map[string]map[string]float64{}
 	var flow_accounts []string
 	for _, a := range s.accounts {
-		if s.is_father(flow_account, a.name) {
-			flow_accounts = append(flow_accounts, a.name)
+		for _, b := range s.accounts {
+			if s.is_father(a.name, b.name) {
+				flow_accounts = append(flow_accounts, b.name)
+			}
 		}
-	}
-
-	new_statement_map := map[string]map[string]map[string]float64{}
-	for key_account_flow, map_account_flow := range statement_map {
-		if is_in(key_account_flow, flow_accounts) {
-			for key_account, map_account := range map_account_flow {
-				if new_statement_map[key_account] == nil {
-					new_statement_map[key_account] = map[string]map[string]float64{}
+		for key_account_flow, map_account_flow := range statement {
+			if is_in(key_account_flow, flow_accounts) {
+				if new_statement[a.name] == nil {
+					new_statement[a.name] = map[string]map[string]map[string]map[string]float64{}
 				}
-				for key_name, map_name := range map_account {
-					var ok bool
-					if len(name) == 0 {
-						ok = true
-					} else if is_in(key_name, name) {
-						ok = true
+				for key_account, map_account := range map_account_flow {
+					if new_statement[a.name][key_account] == nil {
+						new_statement[a.name][key_account] = map[string]map[string]map[string]float64{}
 					}
-					if ok {
+					for key_name, map_name := range map_account {
+						if new_statement[a.name][key_account][key_name] == nil {
+							new_statement[a.name][key_account][key_name] = map[string]map[string]float64{}
+						}
 						for key_vpq, map_vpq := range map_name {
-							if new_statement_map[key_account][key_vpq] == nil {
-								new_statement_map[key_account][key_vpq] = map[string]float64{}
+							if new_statement[a.name][key_account][key_name][key_vpq] == nil {
+								new_statement[a.name][key_account][key_name][key_vpq] = map[string]float64{}
 							}
 							for key_number, number := range map_vpq {
 								switch {
 								case is_in(key_number, []string{"inflow", "outflow"}):
-									if s.is_credit(flow_account) == s.is_credit(key_account_flow) {
-										new_statement_map[key_account][key_vpq][key_number] += number
+									if s.is_credit(a.name) == s.is_credit(key_account_flow) {
+										new_statement[a.name][key_account][key_name][key_vpq][key_number] += number
 									} else {
-										new_statement_map[key_account][key_vpq][key_number] -= number
+										new_statement[a.name][key_account][key_name][key_vpq][key_number] -= number
 									}
 								default:
-									new_statement_map[key_account][key_vpq][key_number] += number
+									new_statement[a.name][key_account][key_name][key_vpq][key_number] = number
 								}
 							}
 						}
@@ -1137,25 +997,89 @@ func (s Financial_accounting) sum_and_extract_new_map(statement_map map[string]m
 				}
 			}
 		}
+		flow_accounts = []string{}
 	}
-	for _, map_account := range new_statement_map {
-		if map_account["price"] == nil {
-			map_account["price"] = map[string]float64{}
+	return new_statement
+}
+
+func (s Financial_accounting) sum_2nd_column(statement map[string]map[string]map[string]map[string]map[string]float64) map[string]map[string]map[string]map[string]map[string]float64 {
+	new_statement := map[string]map[string]map[string]map[string]map[string]float64{}
+	for key_account_flow, map_account_flow := range statement {
+		if new_statement[key_account_flow] == nil {
+			new_statement[key_account_flow] = map[string]map[string]map[string]map[string]float64{}
 		}
-		for key_vpq, map_vpq := range map_account {
-			map_vpq["increase_or_decrease"] = map_vpq["increase"] - map_vpq["decrease"]
-			map_vpq["ending_balance"] = map_vpq["beginning_balance"] + map_vpq["increase_or_decrease"]
-			map_vpq["flow"] = map_vpq["inflow"] - map_vpq["outflow"]
-			map_vpq["average"] = map_vpq["beginning_balance"] + map_vpq["increase_or_decrease"]/2
-			map_vpq["turnover"] = map_vpq["inflow"] / map_vpq["average"]
-			map_vpq["growth_ratio"] = map_vpq["ending_balance"] / map_vpq["beginning_balance"]
-			map_vpq["percent"] = map_vpq["ending_balance"] / (new_statement_map[flow_account][key_vpq]["beginning_balance"] + new_statement_map[flow_account][key_vpq]["increase"] - new_statement_map[flow_account][key_vpq]["decrease"])
-			for key_number, _ := range map_vpq {
-				map_account["price"][key_number] = map_account["value"][key_number] / map_account["quantity"][key_number]
+		for key_account, map_account := range map_account_flow {
+			var last_name string
+			key1 := key_account
+			for {
+				for _, ss := range s.accounts {
+					if ss.name == key_account {
+						key_account = ss.father
+						if new_statement[key_account_flow][ss.name] == nil {
+							new_statement[key_account_flow][ss.name] = map[string]map[string]map[string]float64{}
+						}
+						for key_name, map_name := range map_account {
+							if new_statement[key_account_flow][ss.name][key_name] == nil {
+								new_statement[key_account_flow][ss.name][key_name] = map[string]map[string]float64{}
+							}
+							for key_vpq, map_vpq := range map_name {
+								if new_statement[key_account_flow][ss.name][key_name][key_vpq] == nil {
+									new_statement[key_account_flow][ss.name][key_name][key_vpq] = map[string]float64{}
+								}
+								for key_number, number := range map_vpq {
+									switch {
+									case !is_in(key_number, []string{"inflow", "outflow"}):
+										if s.is_credit(key1) == s.is_credit(ss.name) {
+											new_statement[key_account_flow][ss.name][key_name][key_vpq][key_number] += number
+										} else {
+											new_statement[key_account_flow][ss.name][key_name][key_vpq][key_number] -= number
+										}
+									case key_account_flow != key1:
+										new_statement[key_account_flow][ss.name][key_name][key_vpq][key_number] += number
+									case key_account_flow == ss.name:
+										new_statement[key_account_flow][key1][key_name][key_vpq][key_number] += number
+									}
+								}
+							}
+						}
+					}
+				}
+				if last_name == key_account {
+					break
+				}
+				last_name = key_account
 			}
 		}
 	}
-	return new_statement_map
+	return new_statement
+}
+
+func sum_3rd_column(statement map[string]map[string]map[string]map[string]map[string]float64, name []string) {
+	for _, map_account_flow := range statement {
+		for _, map_account := range map_account_flow {
+			if map_account["names"] == nil {
+				map_account["names"] = map[string]map[string]float64{}
+			}
+			for key_name, map_name := range map_account {
+				var ok bool
+				if len(name) == 0 && key_name != "names" {
+					ok = true
+				} else if is_in(key_name, name) {
+					ok = true
+				}
+				if ok {
+					for key_vpq, map_vpq := range map_name {
+						if map_account["names"][key_vpq] == nil {
+							map_account["names"][key_vpq] = map[string]float64{}
+						}
+						for key_number, number := range map_vpq {
+							map_account["names"][key_vpq][key_number] += number
+						}
+					}
+				}
+			}
+		}
+	}
 }
 
 func sum_flows(a journal_tag, b journal_tag, x float64, all_flows map[string]map[string]map[string]map[string]map[string]float64) {
@@ -1168,29 +1092,55 @@ func sum_flows(a journal_tag, b journal_tag, x float64, all_flows map[string]map
 	}
 }
 
-// func calculate_vpq(new_all_values map[string]map[string]map[string]map[string]map[string]float64) {
-// 	for _, map_account_flow := range new_all_values {
-// 		for key_account, map_account := range map_account_flow {
-// 			for key_name, map_name := range map_account {
-// 				if map_name["price"] == nil {
-// 					map_name["price"] = map[string]float64{}
-// 				}
-// 				for key_vpq, map_vpq := range map_name {
-// 					map_vpq["increase_or_decrease"] = map_vpq["increase"] - map_vpq["decrease"]
-// 					map_vpq["ending_balance"] = map_vpq["beginning_balance"] + map_vpq["increase_or_decrease"]
-// 					map_vpq["flow"] = map_vpq["inflow"] - map_vpq["outflow"]
-// 					map_vpq["average"] = map_vpq["beginning_balance"] + map_vpq["increase_or_decrease"]/2
-// 					map_vpq["turnover"] = map_vpq["inflow"] / map_vpq["average"]
-// 					map_vpq["growth_ratio"] = map_vpq["ending_balance"] / map_vpq["beginning_balance"]
-// 					map_vpq["percent"] = map_account_flow[key_account][key_name][key_vpq]["ending_balance"] / (map_account_flow[key_account][key_name][key_vpq]["beginning_balance"] + map_account_flow[key_account][key_name][key_vpq]["beginning_balance"] - map_account_flow[key_account][key_name][key_vpq]["beginning_balance"])
-// 					for key_number, _ := range map_vpq {
-// 						map_name["price"][key_number] = map_name["value"][key_number] / map_name["quantity"][key_number]
-// 					}
-// 				}
-// 			}
-// 		}
-// 	}
-// }
+func vertical_analysis(statement map[string]map[string]map[string]map[string]map[string]float64, days float64) {
+	for key_account_flow, map_account_flow := range statement {
+		for _, map_account := range map_account_flow {
+			for key_name, map_name := range map_account {
+				for key_vpq, map_vpq := range map_name {
+					map_vpq["increase_or_decrease"] = map_vpq["increase"] - map_vpq["decrease"]
+					map_vpq["ending_balance"] = map_vpq["beginning_balance"] + map_vpq["increase_or_decrease"]
+					map_vpq["flow"] = map_vpq["inflow"] - map_vpq["outflow"]
+					map_vpq["average"] = (map_vpq["ending_balance"] + map_vpq["beginning_balance"]) / 2
+					map_vpq["turnover"] = map_vpq["inflow"] / map_vpq["average"]
+					map_vpq["turnover_days"] = days / map_vpq["turnover"]
+					map_vpq["growth_ratio"] = map_vpq["ending_balance"] / map_vpq["beginning_balance"]
+					map_vpq["percent"] = map_vpq["ending_balance"] /
+						(map_account_flow[key_account_flow][key_name][key_vpq]["beginning_balance"] + map_account_flow[key_account_flow][key_name][key_vpq]["increase"] - map_account_flow[key_account_flow][key_name][key_vpq]["decrease"])
+				}
+			}
+		}
+	}
+}
+
+func horizontal_analysis(statement_current, statement_base map[string]map[string]map[string]map[string]map[string]float64) {
+	for key_account_flow, map_account_flow := range statement_current {
+		for key_account, map_account := range map_account_flow {
+			for key_name, map_name := range map_account {
+				for key_vpq, map_vpq := range map_name {
+					map_vpq["change_since_base_period"] = map_vpq["ending_balance"] - statement_base[key_account_flow][key_account][key_name][key_vpq]["ending_balance"]
+					map_vpq["growth_ratio_to_base_period"] = map_vpq["ending_balance"] / statement_base[key_account_flow][key_account][key_name][key_vpq]["ending_balance"]
+				}
+			}
+		}
+	}
+}
+
+func calculate_price(statement map[string]map[string]map[string]map[string]map[string]float64) {
+	for _, map_account_flow := range statement {
+		for _, map_account := range map_account_flow {
+			for _, map_name := range map_account {
+				if map_name["price"] == nil {
+					map_name["price"] = map[string]float64{}
+				}
+				for _, map_vpq := range map_name {
+					for key_number, _ := range map_vpq {
+						map_name["price"][key_number] = map_name["value"][key_number] / map_name["quantity"][key_number]
+					}
+				}
+			}
+		}
+	}
+}
 
 func select_journal(entry_number uint, account string, start_date, end_date time.Time) []journal_tag {
 	var journal []journal_tag
@@ -1575,7 +1525,7 @@ func target_sales(target_profit, fixed_cost, contribution_margin_ratio float64) 
 }
 
 func main() {
-	v := Financial_accounting{
+	i := Financial_accounting{
 		date_layout:               []string{"2006-01-02 15:04:05.999999999 -0700 +03 m=+0.999999999", "2006-01-02 15:04:05.999999999 -0700 +03"},
 		DriverName:                "mysql",
 		DataSourceName:            "hashem:hashem@tcp(localhost)/",
@@ -1635,11 +1585,11 @@ func main() {
 		auto_complete_entries: [][]account_method_value_price{{{"service revenue", "quantity_ratio", 0, 10}, {"tax of service revenue", "value", 1, 1}, {"tax", "value", 1, 1}, {"service_discount", "value", 1, 1}},
 			{{"book", "quantity_ratio", -1, 0}, {"revenue of book", "quantity_ratio", 1, 10}, {"cost of book", "copy_abs", 0, 0}, {"tax of book", "value", 1, 1}, {"tax", "value", 1, 1}, {"discount of book", "value", 1, 1}}},
 	}
-	v.initialize()
-	// v.journal_entry([]Account_value_quantity_barcode{{"service revenue", 10, 100, ""},{"cash", 989, 989, ""}}, false, true, Now,
+	i.initialize()
+	// i.journal_entry([]Account_value_quantity_barcode{{"service revenue", 10, 100, ""},{"cash", 989, 989, ""}}, false, true, Now,
 	// 	time.Time{}, "", "", "yasa", "hashem", []day_start_end{})
 	// entry := select_journal(0, "cash", time.Time{}, time.Date(2026, time.January, 1, 0, 0, 0, 0, time.Local))
-	// fmt.Println(v.invoice(entry))
+	// fmt.Println(i.invoice(entry))
 	// reverse_entry(2, time.Time{}, time.Date(2026, time.January, 1, 0, 0, 0, 0, time.Local), time.Date(2025, time.January, 1, 0, 0, 0, 0, time.Local), "hashem")
 	// r := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
 	// for _, i := range entry {
@@ -1647,26 +1597,26 @@ func main() {
 	// }
 	// r.Flush()
 
-	balance_sheet, financial_analysis_statement, all_flows_for_all, _ := v.financial_statements(
+	balance_sheet, financial_analysis_statement, all_flows_for_all, _ := i.financial_statements(
 		time.Date(2020, time.January, 1, 0, 0, 0, 0, time.Local),
 		time.Date(2022, time.January, 1, 0, 0, 0, 0, time.Local),
-		1, []string{})
+		2, []string{})
 	w := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
 	fmt.Fprintln(w, "index\t", "account\t",
-		"value_ending_balance\t", "value_average\t", "value_increase\t", "value_decrease\t", "value_increase_or_decrease\t", "value_inflow\t",
+		// "value_ending_balance\t", "value_average\t", "value_increase\t", "value_decrease\t", "value_increase_or_decrease\t", "value_inflow\t",
 		"value_outflow\t", "value_flow\t", "value_turnover\t", "value_percent\t", "value_change_since_base_period\t", "value_growth_ratio_to_base_period\t",
-		"price_ending_balance\t", "price_average\t", "price_increase\t", "price_decrease\t", "price_increase_or_decrease\t", "price_inflow\t",
-		"price_outflow\t", "price_flow\t", "price_turnover\t", "price_percent\t", "price_change_since_base_period\t", "price_growth_ratio_to_base_period\t",
-		"quantity_ending_balance\t", "quantity_average\t", "quantity_increase\t", "quantity_decrease\t", "quantity_increase_or_decrease\t", "quantity_inflow\t",
+		// "price_ending_balance\t", "price_average\t", "price_increase\t", "price_decrease\t", "price_increase_or_decrease\t", "price_inflow\t",
+		// "price_outflow\t", "price_flow\t", "price_turnover\t", "price_percent\t", "price_change_since_base_period\t", "price_growth_ratio_to_base_period\t",
+		// "quantity_ending_balance\t", "quantity_average\t", "quantity_increase\t", "quantity_decrease\t", "quantity_increase_or_decrease\t", "quantity_inflow\t",
 		"quantity_outflow\t", "quantity_flow\t", "quantity_turnover\t", "quantity_percent\t", "quantity_change_since_base_period\t", "quantity_growth_ratio_to_base_period\t")
 	for index, a := range balance_sheet {
 		for _, b := range a {
 			fmt.Fprintln(w, index, "\t", b.account, "\t",
-				b.value_ending_balance, "\t", b.value_average, "\t", b.value_increase, "\t", b.value_decrease, "\t", b.value_increase_or_decrease, "\t", b.value_inflow, "\t",
+				// b.value_ending_balance, "\t", b.value_average, "\t", b.value_increase, "\t", b.value_decrease, "\t", b.value_increase_or_decrease, "\t", b.value_inflow, "\t",
 				b.value_outflow, "\t", b.value_flow, "\t", b.value_turnover, "\t", b.value_percent, "\t", b.value_change_since_base_period, "\t", b.value_growth_ratio_to_base_period, "\t",
-				b.price_ending_balance, "\t", b.price_average, "\t", b.price_increase, "\t", b.price_decrease, "\t", b.price_increase_or_decrease, "\t", b.price_inflow, "\t",
-				b.price_outflow, "\t", b.price_flow, "\t", b.price_turnover, "\t", b.price_percent, "\t", b.price_change_since_base_period, "\t", b.price_growth_ratio_to_base_period, "\t",
-				b.quantity_ending_balance, "\t", b.quantity_average, "\t", b.quantity_increase, "\t", b.quantity_decrease, "\t", b.quantity_increase_or_decrease, "\t", b.quantity_inflow, "\t",
+				// b.price_ending_balance, "\t", b.price_average, "\t", b.price_increase, "\t", b.price_decrease, "\t", b.price_increase_or_decrease, "\t", b.price_inflow, "\t",
+				// b.price_outflow, "\t", b.price_flow, "\t", b.price_turnover, "\t", b.price_percent, "\t", b.price_change_since_base_period, "\t", b.price_growth_ratio_to_base_period, "\t",
+				// b.quantity_ending_balance, "\t", b.quantity_average, "\t", b.quantity_increase, "\t", b.quantity_decrease, "\t", b.quantity_increase_or_decrease, "\t", b.quantity_inflow, "\t",
 				b.quantity_outflow, "\t", b.quantity_flow, "\t", b.quantity_turnover, "\t", b.quantity_percent, "\t", b.quantity_change_since_base_period, "\t", b.quantity_growth_ratio_to_base_period, "\t")
 		}
 		fmt.Fprintln(w, "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t", "\t")
@@ -1685,7 +1635,7 @@ func main() {
 	for _, a := range financial_analysis_statement {
 		fmt.Fprintln(p, a.current_ratio, "\t", a.acid_test, "\t", a.receivables_turnover, "\t", a.inventory_turnover, "\t", a.profit_margin, "\t", a.asset_turnover, "\t", a.return_on_assets, "\t", a.return_on_equity, "\t", a.return_on_common_stockholders_equity, "\t", a.earnings_per_share, "\t", a.price_earnings_ratio, "\t", a.payout_ratio, "\t", a.debt_to_total_assets_ratio, "\t", a.times_interest_earned, "\t")
 	}
-	// p.Flush()
+	p.Flush()
 
 	r := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
 	for _, v := range all_flows_for_all {
@@ -1695,7 +1645,7 @@ func main() {
 				for keyc, c := range b {
 					for keyd, d := range c {
 						for keye, e := range d {
-							if keyb == "inventory" && keyd == "value" && keye == "turnover_days" {
+							if keya == "financial_statement" && keyc == "names" && keyd == "value" && keye == "turnover" {
 								fmt.Fprintln(r, keya, "\t", keyb, "\t", keyc, "\t", keyd, "\t", keye, "\t", e)
 							}
 						}
@@ -1706,10 +1656,10 @@ func main() {
 	}
 	r.Flush()
 
-	a1, ok1 := all_flows_for_all[0]["cash"]["assets"]["yasa"]["value"]["ending_balance"]
-	// a2, ok2 := all_flows_for_all[0]["cash"]["cash"]["yasa"]["value"]["ending_balance"]
-	// a3, ok3 := all_flows_for_all[0]["cash"]["tax"]["yasa"]["value"]["ending_balance"]
-	fmt.Println(a1, ok1)
+	// a1, ok1 := all_flows_for_all[0]["cost_of_goods_sold"]["book"]["names"]["value"]["inflow"]
+	// a2, ok2 := all_flows_for_all[0]["book"]["cost_of_goods_sold"]["names"]["value"]["inflow"]
+	// a3, ok3 := all_flows_for_all[0]["cash"]["tax"]["names"]["value"]["ending_balance"]
+	// fmt.Println(a1, ok1)
 	// fmt.Println(a2, ok2)
 	// fmt.Println(a3, ok3)
 
