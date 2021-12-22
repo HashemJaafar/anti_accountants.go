@@ -515,7 +515,8 @@ func (s Financial_accounting) financial_statements(start_date, end_date time.Tim
 	}
 	statements := []map[string]map[string]map[string]map[string]map[string]float64{}
 	for a := 0; a < periods; a++ {
-		statement := s.statement(journal, start_date.AddDate(0, 0, -days*a), end_date.AddDate(0, 0, -days*a))
+		flow_statement, nan_flow_statement := s.statement(journal, start_date.AddDate(0, 0, -days*a), end_date.AddDate(0, 0, -days*a))
+		statement := combine_statements(flow_statement, nan_flow_statement)
 		statement = s.sum_1st_column(statement)
 		statement = s.sum_2nd_column(statement)
 		sum_3rd_column(statement, names)
@@ -659,17 +660,17 @@ func (s Financial_accounting) cost_flow(account string, quantity float64, barcod
 	return costs
 }
 
-func (s Financial_accounting) statement(journal []journal_tag, start_date, end_date time.Time) map[string]map[string]map[string]map[string]map[string]float64 {
+func (s Financial_accounting) statement(journal []journal_tag, start_date, end_date time.Time) (map[string]map[string]map[string]map[string]map[string]float64, map[string]map[string]map[string]map[string]float64) {
 	var one_compound_entry []journal_tag
 	var previous_date string
 	var previous_entry_number int
 	var date time.Time
-	statement := map[string]map[string]map[string]map[string]map[string]float64{}
+	flow_statement := map[string]map[string]map[string]map[string]map[string]float64{}
 	nan_flow_statement := map[string]map[string]map[string]map[string]float64{}
 	for _, entry := range journal {
 		date = s.parse_date(entry.date)
 		if previous_date != entry.date || previous_entry_number != entry.entry_number {
-			s.sum_flow(date, start_date, one_compound_entry, statement)
+			s.sum_flow(date, start_date, one_compound_entry, flow_statement)
 			s.sum_values(date, start_date, one_compound_entry, nan_flow_statement)
 			one_compound_entry = []journal_tag{}
 		}
@@ -679,33 +680,9 @@ func (s Financial_accounting) statement(journal []journal_tag, start_date, end_d
 		previous_date = entry.date
 		previous_entry_number = entry.entry_number
 	}
-	s.sum_flow(date, start_date, one_compound_entry, statement)
+	s.sum_flow(date, start_date, one_compound_entry, flow_statement)
 	s.sum_values(date, start_date, one_compound_entry, nan_flow_statement)
-
-	for key_account_flow, _ := range nan_flow_statement {
-		if statement[key_account_flow] == nil {
-			statement[key_account_flow] = map[string]map[string]map[string]map[string]float64{}
-		}
-		for key_account, map_account := range nan_flow_statement {
-			if statement[key_account_flow][key_account] == nil {
-				statement[key_account_flow][key_account] = map[string]map[string]map[string]float64{}
-			}
-			for key_name, map_name := range map_account {
-				if statement[key_account_flow][key_account][key_name] == nil {
-					statement[key_account_flow][key_account][key_name] = map[string]map[string]float64{}
-				}
-				for key_vpq, map_vpq := range map_name {
-					if statement[key_account_flow][key_account][key_name][key_vpq] == nil {
-						statement[key_account_flow][key_account][key_name][key_vpq] = map[string]float64{}
-					}
-					for key_number, _ := range map_vpq {
-						statement[key_account_flow][key_account][key_name][key_vpq][key_number] = map_vpq[key_number]
-					}
-				}
-			}
-		}
-	}
-	return statement
+	return flow_statement, nan_flow_statement
 }
 
 func (s Financial_accounting) sum_values(date, start_date time.Time, one_compound_entry []journal_tag, nan_flow_statement map[string]map[string]map[string]map[string]float64) {
@@ -1069,6 +1046,33 @@ func sum_3rd_column(statement map[string]map[string]map[string]map[string]map[st
 			}
 		}
 	}
+}
+
+func combine_statements(flow_statement map[string]map[string]map[string]map[string]map[string]float64, nan_flow_statement map[string]map[string]map[string]map[string]float64) map[string]map[string]map[string]map[string]map[string]float64 {
+	for key_account_flow, _ := range nan_flow_statement {
+		if flow_statement[key_account_flow] == nil {
+			flow_statement[key_account_flow] = map[string]map[string]map[string]map[string]float64{}
+		}
+		for key_account, map_account := range nan_flow_statement {
+			if flow_statement[key_account_flow][key_account] == nil {
+				flow_statement[key_account_flow][key_account] = map[string]map[string]map[string]float64{}
+			}
+			for key_name, map_name := range map_account {
+				if flow_statement[key_account_flow][key_account][key_name] == nil {
+					flow_statement[key_account_flow][key_account][key_name] = map[string]map[string]float64{}
+				}
+				for key_vpq, map_vpq := range map_name {
+					if flow_statement[key_account_flow][key_account][key_name][key_vpq] == nil {
+						flow_statement[key_account_flow][key_account][key_name][key_vpq] = map[string]float64{}
+					}
+					for key_number, _ := range map_vpq {
+						flow_statement[key_account_flow][key_account][key_name][key_vpq][key_number] = map_vpq[key_number]
+					}
+				}
+			}
+		}
+	}
+	return flow_statement
 }
 
 func sum_flows(a journal_tag, b journal_tag, x float64, all_flows map[string]map[string]map[string]map[string]map[string]float64) {
@@ -1603,7 +1607,7 @@ func main() {
 	for _, a := range financial_analysis_statement {
 		fmt.Fprintln(p, a.current_ratio, "\t", a.acid_test, "\t", a.receivables_turnover, "\t", a.inventory_turnover, "\t", a.profit_margin, "\t", a.asset_turnover, "\t", a.return_on_assets, "\t", a.return_on_equity, "\t", a.return_on_common_stockholders_equity, "\t", a.earnings_per_share, "\t", a.price_earnings_ratio, "\t", a.payout_ratio, "\t", a.debt_to_total_assets_ratio, "\t", a.times_interest_earned, "\t")
 	}
-	p.Flush()
+	// p.Flush()
 
 	r := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
 	for _, v := range all_flows_for_all {
@@ -1613,7 +1617,7 @@ func main() {
 				for keyc, c := range b {
 					for keyd, d := range c {
 						for keye, e := range d {
-							if keya == "financial_statement" && keyc == "names" && keyd == "value" && keye == "turnover" {
+							if keya == "financial_statement" && keyc == "names" && keyd == "value" && keye == "ending_balance" {
 								fmt.Fprintln(r, keya, "\t", keyb, "\t", keyc, "\t", keyd, "\t", keye, "\t", e)
 							}
 						}
@@ -1622,7 +1626,7 @@ func main() {
 			}
 		}
 	}
-	r.Flush()
+	// r.Flush()
 
 	// a1, ok1 := all_flows_for_all[0]["cost_of_goods_sold"]["book"]["names"]["value"]["inflow"]
 	// a2, ok2 := all_flows_for_all[0]["book"]["cost_of_goods_sold"]["names"]["value"]["inflow"]
