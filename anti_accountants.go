@@ -118,6 +118,11 @@ type financial_analysis_statement struct {
 	price_earnings_ratio                 float64 // market_price_per_shares_outstanding / earnings_per_share
 }
 
+type filtered_statement struct {
+	key_account_flow, key_account, key_name, key_vpq, key_number string
+	number                                                       float64
+}
+
 type cvp struct {
 	name                                                                 string
 	units_gap, units, sales_per_unit, variable_cost_per_unit, fixed_cost float64
@@ -241,8 +246,7 @@ func (s Financial_accounting) initialize() {
 		var tag Account_value_quantity_barcode
 		rows.Scan(&entry_number, &tag.Account, &tag.value)
 		if previous_entry_number != entry_number {
-			s.check_debit_equal_credit(double_entry)
-			s.check_one_debit_and_one_credit(double_entry)
+			s.check_one_debit_or_one_credit(double_entry, true)
 			journal = append(journal, double_entry)
 			double_entry = []Account_value_quantity_barcode{}
 		}
@@ -262,12 +266,10 @@ func (s Financial_accounting) journal_entry(array_of_entry []Account_value_quant
 	array_of_entry = group_by_account_and_barcode(array_of_entry)
 	array_of_entry = remove_zero_values(array_of_entry)
 	s.can_the_account_be_negative(array_of_entry)
-	s.check_one_debit_or_one_credit(array_of_entry)
-	s.check_debit_equal_credit(array_of_entry)
-	simple_entries := s.convert_to_simple_entry(array_of_entry)
+	debit_entries, credit_entries := s.check_one_debit_or_one_credit(array_of_entry, false)
+	simple_entries := s.convert_to_simple_entry(debit_entries, credit_entries)
 	var all_array_to_insert []journal_tag
 	for _, simple_entry := range simple_entries {
-		s.check_debit_equal_credit(simple_entry)
 		array_to_insert := insert_to_journal_tag(simple_entry, date, entry_expair, description, name, employee_name)
 		if is_in(adjusting_method, depreciation_methods[:]) {
 			adjusted_array_to_insert := adjuste_the_array(entry_expair, date, array_day_start_end, array_to_insert, adjusting_method, description, name, employee_name)
@@ -310,6 +312,47 @@ func (s Financial_accounting) financial_statements(start_date, end_date time.Tim
 		all_analysis = append(all_analysis, analysis)
 	}
 	return statements, all_analysis, journal
+}
+
+func (s Financial_accounting) statement_filter(all_financial_statements []map[string]map[string]map[string]map[string]map[string]float64, account_flow_slice, account_slice, name_slice, vpq_slice, number_slice []string,
+	in_account_flow_slice, in_account_slice, in_name_slice, in_vpq_slice, in_number_slice bool) [][]filtered_statement {
+	var all_statements_struct [][]filtered_statement
+	for _, statement := range all_financial_statements {
+		var statement_struct []filtered_statement
+		for key_account_flow, map_account_flow := range statement {
+			if is_in(key_account_flow, account_flow_slice) == in_account_flow_slice {
+				for key_account, map_account := range map_account_flow {
+					if is_in(key_account, account_slice) == in_account_slice {
+						for key_name, map_name := range map_account {
+							if is_in(key_name, name_slice) == in_name_slice {
+								for key_vpq, map_vpq := range map_name {
+									if is_in(key_vpq, vpq_slice) == in_vpq_slice {
+										for key_number, number := range map_vpq {
+											if is_in(key_number, number_slice) == in_number_slice {
+												statement_struct = append(statement_struct, filtered_statement{key_account_flow, key_account, key_name, key_vpq, key_number, number})
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		var indexa int
+		for _, a := range s.accounts {
+			for indexb, b := range statement_struct {
+				if a.name == b.key_account {
+					statement_struct[indexa], statement_struct[indexb] = statement_struct[indexb], statement_struct[indexa]
+					indexa++
+					break
+				}
+			}
+		}
+		all_statements_struct = append(all_statements_struct, statement_struct)
+	}
+	return all_statements_struct
 }
 
 func (s Financial_accounting) can_the_account_be_negative(array_of_entry []Account_value_quantity_barcode) {
@@ -512,7 +555,7 @@ func (s Financial_accounting) cost_flow(account string, quantity float64, barcod
 }
 
 func (s Financial_accounting) statement(journal []journal_tag, start_date, end_date time.Time) (map[string]map[string]map[string]map[string]map[string]float64, map[string]map[string]map[string]map[string]float64) {
-	var one_compound_entry []journal_tag
+	var one_simple_entry []journal_tag
 	var previous_entry_number int
 	var date time.Time
 	flow_statement := map[string]map[string]map[string]map[string]map[string]float64{}
@@ -520,22 +563,22 @@ func (s Financial_accounting) statement(journal []journal_tag, start_date, end_d
 	for _, entry := range journal {
 		date = s.parse_date(entry.date)
 		if previous_entry_number != entry.entry_number {
-			s.sum_flow(date, start_date, one_compound_entry, flow_statement)
-			s.sum_values(date, start_date, one_compound_entry, nan_flow_statement)
-			one_compound_entry = []journal_tag{}
+			s.sum_flow(date, start_date, one_simple_entry, flow_statement)
+			s.sum_values(date, start_date, one_simple_entry, nan_flow_statement)
+			one_simple_entry = []journal_tag{}
 		}
 		if date.Before(end_date) {
-			one_compound_entry = append(one_compound_entry, entry)
+			one_simple_entry = append(one_simple_entry, entry)
 		}
 		previous_entry_number = entry.entry_number
 	}
-	s.sum_flow(date, start_date, one_compound_entry, flow_statement)
-	s.sum_values(date, start_date, one_compound_entry, nan_flow_statement)
+	s.sum_flow(date, start_date, one_simple_entry, flow_statement)
+	s.sum_values(date, start_date, one_simple_entry, nan_flow_statement)
 	return flow_statement, nan_flow_statement
 }
 
-func (s Financial_accounting) sum_values(date, start_date time.Time, one_compound_entry []journal_tag, nan_flow_statement map[string]map[string]map[string]map[string]float64) {
-	for _, b := range one_compound_entry {
+func (s Financial_accounting) sum_values(date, start_date time.Time, one_simple_entry []journal_tag, nan_flow_statement map[string]map[string]map[string]map[string]float64) {
+	for _, b := range one_simple_entry {
 		if nan_flow_statement[b.account] == nil {
 			nan_flow_statement[b.account] = map[string]map[string]map[string]float64{}
 		}
@@ -585,29 +628,29 @@ func (s Financial_accounting) sum_values(date, start_date time.Time, one_compoun
 	}
 }
 
-func (s Financial_accounting) sum_flow(date, start_date time.Time, one_compound_entry []journal_tag, all_flows map[string]map[string]map[string]map[string]map[string]float64) {
-	for _, a := range one_compound_entry {
-		if all_flows[a.account] == nil {
-			all_flows[a.account] = map[string]map[string]map[string]map[string]float64{}
+func (s Financial_accounting) sum_flow(date, start_date time.Time, one_simple_entry []journal_tag, flow_statement map[string]map[string]map[string]map[string]map[string]float64) {
+	for _, a := range one_simple_entry {
+		if flow_statement[a.account] == nil {
+			flow_statement[a.account] = map[string]map[string]map[string]map[string]float64{}
 		}
-		for _, b := range one_compound_entry {
-			if all_flows[a.account][b.account] == nil {
-				all_flows[a.account][b.account] = map[string]map[string]map[string]float64{}
+		for _, b := range one_simple_entry {
+			if flow_statement[a.account][b.account] == nil {
+				flow_statement[a.account][b.account] = map[string]map[string]map[string]float64{}
 			}
-			if all_flows[a.account][b.account][b.name] == nil {
-				all_flows[a.account][b.account][b.name] = map[string]map[string]float64{}
+			if flow_statement[a.account][b.account][b.name] == nil {
+				flow_statement[a.account][b.account][b.name] = map[string]map[string]float64{}
 			}
-			if all_flows[a.account][b.account][b.name]["value"] == nil {
-				all_flows[a.account][b.account][b.name]["value"] = map[string]float64{}
+			if flow_statement[a.account][b.account][b.name]["value"] == nil {
+				flow_statement[a.account][b.account][b.name]["value"] = map[string]float64{}
 			}
-			if all_flows[a.account][b.account][b.name]["quantity"] == nil {
-				all_flows[a.account][b.account][b.name]["quantity"] = map[string]float64{}
+			if flow_statement[a.account][b.account][b.name]["quantity"] == nil {
+				flow_statement[a.account][b.account][b.name]["quantity"] = map[string]float64{}
 			}
 			if date.After(start_date) {
 				if b.account == a.account || s.is_credit(b.account) != s.is_credit(a.account) {
-					sum_flows(a, b, 1, all_flows)
+					sum_flows(a, b, 1, flow_statement)
 				} else {
-					sum_flows(a, b, -1, all_flows)
+					sum_flows(a, b, -1, flow_statement)
 				}
 			}
 		}
@@ -653,16 +696,6 @@ func (s Financial_accounting) prepare_statement(statement map[string]map[string]
 			}
 		}
 	}
-	// var indexa int
-	// for _, a := range s.accounts {
-	// 	for indexb, b := range statement_sheet {
-	// 		if a.name == b.account {
-	// 			statement_sheet[indexa], statement_sheet[indexb] = statement_sheet[indexb], statement_sheet[indexa]
-	// 			indexa++
-	// 			break
-	// 		}
-	// 	}
-	// }
 }
 
 func (s Financial_accounting) parse_date(string_date string) time.Time {
@@ -713,62 +746,42 @@ func (s Financial_accounting) is_credit(name string) bool {
 	return false
 }
 
-func (s Financial_accounting) check_debit_equal_credit(array_of_entry []Account_value_quantity_barcode) {
+func (s Financial_accounting) check_one_debit_or_one_credit(array_of_entry []Account_value_quantity_barcode, check_one_debit_and_one_credit bool) ([]Account_value_quantity_barcode, []Account_value_quantity_barcode) {
+	var debit_entries, credit_entries []Account_value_quantity_barcode
 	var zero float64
 	for _, entry := range array_of_entry {
 		switch s.is_credit(entry.Account) {
 		case false:
 			zero += entry.value
+			if entry.value >= 0 {
+				debit_entries = append(debit_entries, entry)
+			} else {
+				credit_entries = append(credit_entries, entry)
+			}
 		case true:
 			zero -= entry.value
+			if entry.value <= 0 {
+				debit_entries = append(debit_entries, entry)
+			} else {
+				credit_entries = append(credit_entries, entry)
+			}
 		}
+	}
+	len_debit_entries := len(debit_entries)
+	len_credit_entries := len(credit_entries)
+	if (len_debit_entries != 1) && (len_credit_entries != 1) {
+		log.Panic("should be one credit or one debit in the entry ", array_of_entry)
+	}
+	if !((len_debit_entries == 1) && (len_credit_entries == 1)) && check_one_debit_and_one_credit {
+		log.Panic("should be one credit and one debit in the entry ", array_of_entry)
 	}
 	if zero != 0 {
 		log.Panic(zero, " not equal 0 if the number>0 it means debit overstated else credit overstated debit-credit should equal zero ", array_of_entry)
 	}
+	return debit_entries, credit_entries
 }
 
-func (s Financial_accounting) check_one_debit_or_one_credit(array_of_entry []Account_value_quantity_barcode) {
-	var debit_number, credit_number int
-	for _, entry := range array_of_entry {
-		switch s.is_credit(entry.Account) {
-		case false:
-			if entry.value >= 0 {
-				debit_number++
-			} else {
-				credit_number++
-			}
-		case true:
-			if entry.value <= 0 {
-				debit_number++
-			} else {
-				credit_number++
-			}
-		}
-	}
-	if (debit_number != 1) && (credit_number != 1) {
-		log.Panic("should be one credit or one debit in the entry ", array_of_entry)
-	}
-}
-
-func (s Financial_accounting) convert_to_simple_entry(array_of_entry []Account_value_quantity_barcode) [][]Account_value_quantity_barcode {
-	var debit_entries, credit_entries []Account_value_quantity_barcode
-	for _, entry := range array_of_entry {
-		switch s.is_credit(entry.Account) {
-		case false:
-			if entry.value >= 0 {
-				debit_entries = append(debit_entries, entry)
-			} else {
-				credit_entries = append(credit_entries, entry)
-			}
-		case true:
-			if entry.value <= 0 {
-				debit_entries = append(debit_entries, entry)
-			} else {
-				credit_entries = append(credit_entries, entry)
-			}
-		}
-	}
+func (s Financial_accounting) convert_to_simple_entry(debit_entries, credit_entries []Account_value_quantity_barcode) [][]Account_value_quantity_barcode {
 	simple_entries := [][]Account_value_quantity_barcode{}
 	for _, debit_entry := range debit_entries {
 		for _, credit_entry := range credit_entries {
@@ -789,31 +802,7 @@ func (s Financial_accounting) convert_to_simple_entry(array_of_entry []Account_v
 			a[1].quantity = a[1].value / price
 		}
 	}
-	fmt.Println(simple_entries)
 	return simple_entries
-}
-
-func (s Financial_accounting) check_one_debit_and_one_credit(array_of_entry []Account_value_quantity_barcode) {
-	var debit_number, credit_number int
-	for _, entry := range array_of_entry {
-		switch s.is_credit(entry.Account) {
-		case false:
-			if entry.value >= 0 {
-				debit_number++
-			} else {
-				credit_number++
-			}
-		case true:
-			if entry.value <= 0 {
-				debit_number++
-			} else {
-				credit_number++
-			}
-		}
-	}
-	if !((debit_number == 1) && (credit_number == 1)) {
-		log.Panic("should be one credit or one debit in the entry ", array_of_entry)
-	}
 }
 
 func (s Financial_accounting) analysis(statement map[string]map[string]map[string]map[string]map[string]float64) financial_analysis_statement {
@@ -1000,13 +989,13 @@ func combine_statements(flow_statement map[string]map[string]map[string]map[stri
 	return flow_statement
 }
 
-func sum_flows(a journal_tag, b journal_tag, x float64, all_flows map[string]map[string]map[string]map[string]map[string]float64) {
+func sum_flows(a journal_tag, b journal_tag, x float64, flow_statement map[string]map[string]map[string]map[string]map[string]float64) {
 	if b.value*x < 0 {
-		all_flows[a.account][b.account][b.name]["value"]["outflow"] += math.Abs(b.value)
-		all_flows[a.account][b.account][b.name]["quantity"]["outflow"] += math.Abs(b.quantity)
+		flow_statement[a.account][b.account][b.name]["value"]["outflow"] += math.Abs(b.value)
+		flow_statement[a.account][b.account][b.name]["quantity"]["outflow"] += math.Abs(b.quantity)
 	} else {
-		all_flows[a.account][b.account][b.name]["value"]["inflow"] += math.Abs(b.value)
-		all_flows[a.account][b.account][b.name]["quantity"]["inflow"] += math.Abs(b.quantity)
+		flow_statement[a.account][b.account][b.name]["value"]["inflow"] += math.Abs(b.value)
+		flow_statement[a.account][b.account][b.name]["quantity"]["inflow"] += math.Abs(b.quantity)
 	}
 }
 
@@ -1710,15 +1699,17 @@ func main() {
 
 	p := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
 
-	// i.journal_entry([]Account_value_quantity_barcode{{"cash", 600, 600, ""}, {"panadol", 600, -177, ""}, {"sales", 262.8571428571429, 262.8571428571429, ""}}, true, false, Now,
+	// entry := i.journal_entry([]Account_value_quantity_barcode{{"cash", 600 - 3.552713678800501e-14, 600 - 3.552713678800501e-14, ""}, {"panadol", 600, -33, ""}, {"sales", 537.1428571428571, 537.1428571428571, ""}}, false, false, Now,
 	// 	time.Time{}, "", "", "basma", "hashem", []day_start_end{})
 
 	// i.reverse_entry(8, "hashem")
 
-	all_flows_for_all, _, _ := i.financial_statements(
+	all_financial_statements, _, _ := i.financial_statements(
 		time.Date(2020, time.January, 1, 0, 0, 0, 0, time.Local),
 		time.Date(2022, time.December, 25, 0, 0, 0, 0, time.Local),
 		1, []string{"saba"})
+
+	filtered_statement := i.statement_filter(all_financial_statements, []string{"financial_statement"}, []string{}, []string{"basma"}, []string{"value"}, []string{"ending_balance"}, true, false, true, true, true)
 
 	// for _, i := range entry {
 	// 	fmt.Fprintln(p, "\t", i.date, "\t", i.entry_number, "\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.barcode, "\t", i.entry_expair, "\t", i.description, "\t", i.name, "\t", i.employee_name, "\t", i.entry_date, "\t", i.reverse)
@@ -1734,25 +1725,14 @@ func main() {
 	// 	fmt.Fprintln(p, a.current_ratio, "\t", a.acid_test, "\t", a.receivables_turnover, "\t", a.inventory_turnover, "\t", a.profit_margin, "\t", a.asset_turnover, "\t", a.return_on_assets, "\t", a.return_on_equity, "\t", a.return_on_common_stockholders_equity, "\t", a.earnings_per_share, "\t", a.price_earnings_ratio, "\t", a.payout_ratio, "\t", a.debt_to_total_assets_ratio, "\t", a.times_interest_earned, "\t")
 	// }
 
-	for _, v := range all_flows_for_all {
-		fmt.Fprintln(p, "/////////////////////////////////////////////////////////////////////////////////////////////")
-		for keya, a := range v {
-			for keyb, b := range a {
-				for keyc, c := range b {
-					for keyd, d := range c {
-						for keye, e := range d {
-							if keya == "financial_statement" && keyc == "all" && keyd == "value" && keye == "ending_balance" {
-								fmt.Fprintln(p, keya, "\t", keyb, "\t", keyc, "\t", keyd, "\t", keye, "\t", e)
-							}
-						}
-					}
-				}
-			}
+	for _, a := range filtered_statement {
+		for _, b := range a {
+			fmt.Fprintln(p, b.key_account_flow, "\t", b.key_account, "\t", b.key_name, "\t", b.key_vpq, "\t", b.key_number, "\t", b.number)
 		}
 	}
 
-	// a1, ok1 := all_flows_for_all[0]["financial_statement"]["panadol"]["zaid"]["value"]["ending_balance"]
-	// a2, ok2 := all_flows_for_all[0]["financial_statement"]["panadol"]["all"]["value"]["ending_balance"]
+	// a1, ok1 := all_financial_statements[0]["financial_statement"]["panadol"]["zaid"]["value"]["ending_balance"]
+	// a2, ok2 := all_financial_statements[0]["financial_statement"]["panadol"]["all"]["value"]["ending_balance"]
 	// fmt.Println(a1, ok1)
 	// fmt.Println(a2, ok2)
 
