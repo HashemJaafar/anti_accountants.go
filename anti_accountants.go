@@ -235,13 +235,14 @@ func (s Financial_accounting) initialize() {
 	var journal [][]Account_value_quantity_barcode
 	var double_entry []Account_value_quantity_barcode
 	previous_entry_number := 1
-	rows, _ := db.Query("select entry_number,account,value from journal")
+	rows, _ := db.Query("select entry_number,account,value from journal order by date,entry_number")
 	for rows.Next() {
 		var entry_number int
 		var tag Account_value_quantity_barcode
 		rows.Scan(&entry_number, &tag.Account, &tag.value)
 		if previous_entry_number != entry_number {
 			s.check_debit_equal_credit(double_entry)
+			s.check_one_debit_and_one_credit(double_entry)
 			journal = append(journal, double_entry)
 			double_entry = []Account_value_quantity_barcode{}
 		}
@@ -252,235 +253,31 @@ func (s Financial_accounting) initialize() {
 
 func (s Financial_accounting) journal_entry(array_of_entry []Account_value_quantity_barcode, insert, auto_completion bool, date time.Time, entry_expair time.Time, adjusting_method string,
 	description string, name string, employee_name string, array_day_start_end []day_start_end) []journal_tag {
-
-	if entry_expair.IsZero() == is_in(adjusting_method, adjusting_methods[:]) {
-		log.Panic("check entry_expair => ", entry_expair, " and adjusting_method => ", adjusting_method, " should be in ", adjusting_methods)
-	}
-
-	if !entry_expair.IsZero() {
-		check_dates(date, entry_expair)
-	}
-
+	array_day_start_end = check_the_params(entry_expair, adjusting_method, date, array_of_entry, array_day_start_end)
 	array_of_entry = group_by_account_and_barcode(array_of_entry)
 	array_of_entry = remove_zero_values(array_of_entry)
-	for index, entry := range array_of_entry {
-		if entry.Account == "" && entry.barcode == "" {
-			log.Panic("can't find the account name if the barcode is empty in ", entry)
-		}
-		var tag string
-		if entry.Account == "" {
-			err := db.QueryRow("select account from journal where barcode=? limit 1", entry.barcode).Scan(&tag)
-			if err != nil {
-				log.Panic("the barcode is wrong for ", entry)
-			}
-			array_of_entry[index].Account = tag
-		}
-		if is_in(entry.Account, inventory) && !is_in(adjusting_method, []string{"expire", ""}) {
-			log.Panic(entry.Account + " is in inventory you just can use expire or make it empty")
-		}
-	}
-
-	for index, entry := range array_of_entry {
-		costs := s.cost_flow(entry.Account, entry.quantity, entry.barcode, false)
-		if costs != 0 {
-			array_of_entry[index] = Account_value_quantity_barcode{entry.Account, -costs, entry.quantity, entry.barcode}
-		}
-		if auto_completion {
-			for _, complement := range s.auto_complete_entries {
-				if complement[0].account == entry.Account && (entry.quantity >= 0) == (complement[0].value_or_percent >= 0) {
-					if costs == 0 {
-						array_of_entry[index] = Account_value_quantity_barcode{complement[0].account, complement[0].price * entry.quantity, entry.quantity, ""}
-					}
-					for _, i := range complement[1:] {
-						switch i.method {
-						case "copy_abs":
-							array_of_entry = append(array_of_entry, Account_value_quantity_barcode{i.account, math.Abs(array_of_entry[index].value), math.Abs(array_of_entry[index].quantity), ""})
-						case "copy":
-							array_of_entry = append(array_of_entry, Account_value_quantity_barcode{i.account, array_of_entry[index].value, array_of_entry[index].quantity, ""})
-						case "quantity_ratio":
-							array_of_entry = append(array_of_entry, Account_value_quantity_barcode{i.account, math.Abs(array_of_entry[index].quantity) * i.price * i.value_or_percent, math.Abs(array_of_entry[index].quantity) * i.value_or_percent, ""})
-						case "value":
-							array_of_entry = append(array_of_entry, Account_value_quantity_barcode{i.account, i.value_or_percent, i.value_or_percent / i.price, ""})
-						default:
-							log.Panic(i.method, "in the method field for ", i, " dose not exist you just can use copy_abs or copy or quantity_ratio or value")
-						}
-					}
-				}
-			}
-		}
-	}
-	if auto_completion {
-		var total_invoice_before_invoice_discount, discount float64
-		for _, entry := range array_of_entry {
-			if s.is_father(s.income_statement, entry.Account) && s.is_credit(entry.Account) {
-				total_invoice_before_invoice_discount += entry.value
-			} else if s.is_father(s.discounts, entry.Account) && !s.is_credit(entry.Account) {
-				total_invoice_before_invoice_discount -= entry.value
-			}
-		}
-		for _, i := range s.Invoice_discounts_list {
-			if total_invoice_before_invoice_discount >= i[0] {
-				discount = i[1]
-			}
-		}
-		invoice_discount := discount_tax_calculator(total_invoice_before_invoice_discount, discount)
-		array_of_entry = append(array_of_entry, Account_value_quantity_barcode{s.invoice_discount, invoice_discount, 1, ""})
-	}
-
+	find_barcode(array_of_entry)
+	array_of_entry = s.auto_completion_the_entry(array_of_entry, auto_completion)
+	array_of_entry = s.auto_completion_the_invoice_discount(auto_completion, array_of_entry)
 	array_of_entry = group_by_account_and_barcode(array_of_entry)
 	array_of_entry = remove_zero_values(array_of_entry)
-	var price_slice []float64
-	for index, entry := range array_of_entry {
-		if !(s.is_father(s.equity, entry.Account) && s.is_credit(entry.Account)) {
-			var account_balance float64
-			db.QueryRow("select sum(value) from journal where account=? and date<?", entry.Account, Now.String()).Scan(&account_balance)
-			if account_balance+entry.value < 0 {
-				log.Panic("you cant enter ", entry, " because you have ", account_balance, " and that will make the balance of ", entry.Account, " negative ", account_balance+entry.value, " and that you just can do it in equity_normal accounts not other accounts")
-			}
-		}
-		price_slice = append(price_slice, entry.value/entry.quantity)
-		if price_slice[index] < 0 {
-			log.Panic("the ", entry.value, " and ", entry.quantity, " for ", entry, " should be positive both or negative both")
-		}
-	}
-
+	s.can_the_account_be_negative(array_of_entry)
+	s.check_one_debit_or_one_credit(array_of_entry)
 	s.check_debit_equal_credit(array_of_entry)
-
-	entry_number := entry_number()
-	var array_to_insert []journal_tag
-	for index, entry := range array_of_entry {
-		array_to_insert = append(array_to_insert, journal_tag{
-			date:          date.String(),
-			entry_number:  entry_number,
-			account:       entry.Account,
-			value:         entry.value,
-			price:         price_slice[index],
-			quantity:      entry.quantity,
-			barcode:       entry.barcode,
-			entry_expair:  entry_expair.String(),
-			description:   description,
-			name:          name,
-			employee_name: employee_name,
-			entry_date:    Now.String(),
-			reverse:       false,
-		})
+	simple_entries := s.convert_to_simple_entry(array_of_entry)
+	var all_array_to_insert []journal_tag
+	for _, simple_entry := range simple_entries {
+		s.check_debit_equal_credit(simple_entry)
+		array_to_insert := insert_to_journal_tag(simple_entry, date, entry_expair, description, name, employee_name)
+		if is_in(adjusting_method, depreciation_methods[:]) {
+			adjusted_array_to_insert := adjuste_the_array(entry_expair, date, array_day_start_end, array_to_insert, adjusting_method, description, name, employee_name)
+			adjusted_array_to_insert = transpose(adjusted_array_to_insert)
+			array_to_insert = unpack_the_array(array_to_insert, adjusted_array_to_insert)
+		}
+		all_array_to_insert = append(all_array_to_insert, array_to_insert...)
 	}
-
-	if is_in(adjusting_method, depreciation_methods[:]) {
-		if len(array_day_start_end) == 0 {
-			array_day_start_end = []day_start_end{
-				{"saturday", 0, 0, 23, 59},
-				{"sunday", 0, 0, 23, 59},
-				{"monday", 0, 0, 23, 59},
-				{"tuesday", 0, 0, 23, 59},
-				{"wednesday", 0, 0, 23, 59},
-				{"thursday", 0, 0, 23, 59},
-				{"friday", 0, 0, 23, 59}}
-		}
-		for index, element := range array_day_start_end {
-			array_day_start_end[index].day = strings.Title(element.day)
-			switch {
-			case !is_in(array_day_start_end[index].day, standard_days[:]):
-				log.Panic("error ", element.day, " for ", element, " is not in ", standard_days)
-			case element.start_hour < 0:
-				log.Panic("error ", element.start_hour, " for ", element, " is < 0")
-			case element.start_hour > 23:
-				log.Panic("error ", element.start_hour, " for ", element, " is > 23")
-			case element.start_minute < 0:
-				log.Panic("error ", element.start_minute, " for ", element, " is < 0")
-			case element.start_minute > 59:
-				log.Panic("error ", element.start_minute, " for ", element, " is > 59")
-			case element.end_hour < 0:
-				log.Panic("error ", element.end_hour, " for ", element, " is < 0")
-			case element.end_hour > 23:
-				log.Panic("error ", element.end_hour, " for ", element, " is > 23")
-			case element.end_minute < 0:
-				log.Panic("error ", element.end_minute, " for ", element, " is < 0")
-			case element.end_minute > 59:
-				log.Panic("error ", element.end_minute, " for ", element, " is > 59")
-			}
-		}
-
-		var day_start_end_date_minutes_array []day_start_end_date_minutes
-		var total_minutes float64
-		var previous_end_date, end time.Time
-		delta_days := int(entry_expair.Sub(date).Hours()/24 + 1)
-		year, month_sting, day := date.Date()
-		for day_counter := 0; day_counter < delta_days; day_counter++ {
-			for _, element := range array_day_start_end {
-				if start := time.Date(year, month_sting, day+day_counter, element.start_hour, element.start_minute, 0, 0, time.Local); start.Weekday().String() == element.day {
-					previous_end_date = end
-					end = time.Date(year, month_sting, day+day_counter, element.end_hour, element.end_minute, 0, 0, time.Local)
-					if start.After(end) {
-						log.Panic("the start_hour and start_minute should be smaller than end_hour and end_minute for ", element)
-					}
-					if previous_end_date.After(start) {
-						log.Panic("the end_hour and end_minute for ", element.day, " should be smaller than start_hour and start_minute for the second ", element)
-					}
-					minutes := end.Sub(start).Minutes()
-					total_minutes += minutes
-					day_start_end_date_minutes_array = append(day_start_end_date_minutes_array, day_start_end_date_minutes{element.day, start, end, minutes})
-				}
-			}
-		}
-
-		var adjusted_array_to_insert [][]journal_tag
-		for _, entry := range array_to_insert {
-			var value, value_counter, second_counter float64
-			var one_account_adjusted_list []journal_tag
-			total_value := math.Abs(entry.value)
-			deprecation := math.Pow(total_value, 1/total_minutes)
-			value_per_second := entry.value / total_minutes
-			for index, element := range day_start_end_date_minutes_array {
-				switch adjusting_method {
-				case "linear":
-					value = element.minutes * value_per_second
-				case "exponential":
-					value = math.Pow(deprecation, second_counter+element.minutes) - math.Pow(deprecation, second_counter)
-				case "logarithmic":
-					value = (total_value / math.Pow(deprecation, second_counter)) - (total_value / math.Pow(deprecation, second_counter+element.minutes))
-				}
-				second_counter += element.minutes
-
-				quantity := value / entry.price
-				if index >= delta_days-1 {
-					value = math.Abs(total_value - value_counter)
-					quantity = value / entry.price
-				}
-				value_counter += math.Abs(value)
-				if entry.value < 0 {
-					value = -math.Abs(value)
-				}
-				if entry.quantity < 0 {
-					quantity = -math.Abs(quantity)
-				}
-
-				one_account_adjusted_list = append(one_account_adjusted_list, journal_tag{
-					date:          element.start_date.String(),
-					entry_number:  entry_number,
-					account:       entry.account,
-					value:         value,
-					price:         entry.price,
-					quantity:      quantity,
-					barcode:       entry.barcode,
-					entry_expair:  element.end_date.String(),
-					description:   description,
-					name:          name,
-					employee_name: employee_name,
-					entry_date:    Now.String(),
-					reverse:       false,
-				})
-			}
-			adjusted_array_to_insert = append(adjusted_array_to_insert, one_account_adjusted_list)
-		}
-		adjusted_array_to_insert = transpose(adjusted_array_to_insert)
-		array_to_insert = []journal_tag{}
-		for _, element := range adjusted_array_to_insert {
-			array_to_insert = append(array_to_insert, element...)
-		}
-	}
-	s.insert_to_database(array_to_insert, insert, insert, insert)
-	return array_to_insert
+	s.insert_to_database(all_array_to_insert, insert, insert, insert)
+	return all_array_to_insert
 }
 
 func (s Financial_accounting) financial_statements(start_date, end_date time.Time, periods int, names []string) ([]map[string]map[string]map[string]map[string]map[string]float64, []financial_analysis_statement, []journal_tag) {
@@ -515,6 +312,72 @@ func (s Financial_accounting) financial_statements(start_date, end_date time.Tim
 	return statements, all_analysis, journal
 }
 
+func (s Financial_accounting) can_the_account_be_negative(array_of_entry []Account_value_quantity_barcode) {
+	for _, entry := range array_of_entry {
+		if !(s.is_father(s.equity, entry.Account) && s.is_credit(entry.Account)) {
+			var account_balance float64
+			db.QueryRow("select sum(value) from journal where account=? and date<?", entry.Account, Now.String()).Scan(&account_balance)
+			if account_balance+entry.value < 0 {
+				log.Panic("you cant enter ", entry, " because you have ", account_balance, " and that will make the balance of ", entry.Account, " negative ", account_balance+entry.value, " and that you just can do it in equity_normal accounts not other accounts")
+			}
+		}
+	}
+}
+
+func (s Financial_accounting) auto_completion_the_invoice_discount(auto_completion bool, array_of_entry []Account_value_quantity_barcode) []Account_value_quantity_barcode {
+	if auto_completion {
+		var total_invoice_before_invoice_discount, discount float64
+		for _, entry := range array_of_entry {
+			if s.is_father(s.income_statement, entry.Account) && s.is_credit(entry.Account) {
+				total_invoice_before_invoice_discount += entry.value
+			} else if s.is_father(s.discounts, entry.Account) && !s.is_credit(entry.Account) {
+				total_invoice_before_invoice_discount -= entry.value
+			}
+		}
+		for _, i := range s.Invoice_discounts_list {
+			if total_invoice_before_invoice_discount >= i[0] {
+				discount = i[1]
+			}
+		}
+		invoice_discount := discount_tax_calculator(total_invoice_before_invoice_discount, discount)
+		array_of_entry = append(array_of_entry, Account_value_quantity_barcode{s.invoice_discount, invoice_discount, 1, ""})
+	}
+	return array_of_entry
+}
+
+func (s Financial_accounting) auto_completion_the_entry(array_of_entry []Account_value_quantity_barcode, auto_completion bool) []Account_value_quantity_barcode {
+	for index, entry := range array_of_entry {
+		costs := s.cost_flow(entry.Account, entry.quantity, entry.barcode, false)
+		if costs != 0 {
+			array_of_entry[index] = Account_value_quantity_barcode{entry.Account, -costs, entry.quantity, entry.barcode}
+		}
+		if auto_completion {
+			for _, complement := range s.auto_complete_entries {
+				if complement[0].account == entry.Account && (entry.quantity >= 0) == (complement[0].value_or_percent >= 0) {
+					if costs == 0 {
+						array_of_entry[index] = Account_value_quantity_barcode{complement[0].account, complement[0].price * entry.quantity, entry.quantity, ""}
+					}
+					for _, i := range complement[1:] {
+						switch i.method {
+						case "copy_abs":
+							array_of_entry = append(array_of_entry, Account_value_quantity_barcode{i.account, math.Abs(array_of_entry[index].value), math.Abs(array_of_entry[index].quantity), ""})
+						case "copy":
+							array_of_entry = append(array_of_entry, Account_value_quantity_barcode{i.account, array_of_entry[index].value, array_of_entry[index].quantity, ""})
+						case "quantity_ratio":
+							array_of_entry = append(array_of_entry, Account_value_quantity_barcode{i.account, math.Abs(array_of_entry[index].quantity) * i.price * i.value_or_percent, math.Abs(array_of_entry[index].quantity) * i.value_or_percent, ""})
+						case "value":
+							array_of_entry = append(array_of_entry, Account_value_quantity_barcode{i.account, i.value_or_percent, i.value_or_percent / i.price, ""})
+						default:
+							log.Panic(i.method, "in the method field for ", i, " dose not exist you just can use copy_abs or copy or quantity_ratio or value")
+						}
+					}
+				}
+			}
+		}
+	}
+	return array_of_entry
+}
+
 func (s Financial_accounting) invoice(array_of_journal_tag []journal_tag) []invoice_struct {
 	m := map[string]*invoice_struct{}
 	for _, entry := range array_of_journal_tag {
@@ -544,10 +407,14 @@ func (s Financial_accounting) invoice(array_of_journal_tag []journal_tag) []invo
 	return invoice
 }
 
-func (s Financial_accounting) reverse_entry(number uint, start_date, end_date, entry_expair time.Time, employee_name string) {
-	reverse_entry_number := entry_number()
-	var array_of_entry_to_reverse []journal_tag
-	array_of_journal_tag := select_journal(number, "", start_date, end_date)
+func (s Financial_accounting) reverse_entry(entry_number uint, employee_name string) {
+	var array_of_entry_to_reverse, array_of_journal_tag []journal_tag
+	rows, _ := db.Query("select * from journal where entry_number=? order by date", entry_number)
+	for rows.Next() {
+		var tag journal_tag
+		rows.Scan(&tag.date, &tag.entry_number, &tag.account, &tag.value, &tag.price, &tag.quantity, &tag.barcode, &tag.entry_expair, &tag.description, &tag.name, &tag.employee_name, &tag.entry_date, &tag.reverse)
+		array_of_journal_tag = append(array_of_journal_tag, tag)
+	}
 	if len(array_of_journal_tag) == 0 {
 		log.Panic("this entry not exist")
 	}
@@ -558,10 +425,9 @@ func (s Financial_accounting) reverse_entry(number uint, start_date, end_date, e
 					entry.date, entry.entry_number, entry.account, entry.value, entry.price, entry.quantity, entry.barcode, entry.entry_expair, entry.description, entry.name, entry.employee_name, entry.entry_date, entry.reverse)
 				entry.description = "(reverse entry for entry number " + strconv.Itoa(entry.entry_number) + " entered by " + entry.employee_name + " and revised by " + employee_name + ")"
 				entry.date = Now.String()
-				entry.entry_number = reverse_entry_number
 				entry.value *= -1
 				entry.quantity *= -1
-				entry.entry_expair = entry_expair.String()
+				entry.entry_expair = time.Time{}.String()
 				entry.employee_name = employee_name
 				entry.entry_date = Now.String()
 				array_of_entry_to_reverse = append(array_of_entry_to_reverse, entry)
@@ -576,7 +442,11 @@ func (s Financial_accounting) reverse_entry(number uint, start_date, end_date, e
 }
 
 func (s Financial_accounting) insert_to_database(array_of_journal_tag []journal_tag, insert_into_journal, insert_into_inventory, inventory_flow bool) {
-	for _, entry := range array_of_journal_tag {
+	entry_number := float64(entry_number())
+	for indexa, entry := range array_of_journal_tag {
+		entry.entry_number = int(entry_number)
+		array_of_journal_tag[indexa].entry_number = int(entry_number)
+		entry_number += 0.5
 		if insert_into_journal {
 			db.Exec("insert into journal(date,entry_number,account,value,price,quantity,barcode,entry_expair,description,name,employee_name,entry_date,reverse) values (?,?,?,?,?,?,?,?,?,?,?,?,?)",
 				&entry.date, &entry.entry_number, &entry.account, &entry.value, &entry.price, &entry.quantity, &entry.barcode,
@@ -643,14 +513,13 @@ func (s Financial_accounting) cost_flow(account string, quantity float64, barcod
 
 func (s Financial_accounting) statement(journal []journal_tag, start_date, end_date time.Time) (map[string]map[string]map[string]map[string]map[string]float64, map[string]map[string]map[string]map[string]float64) {
 	var one_compound_entry []journal_tag
-	var previous_date string
 	var previous_entry_number int
 	var date time.Time
 	flow_statement := map[string]map[string]map[string]map[string]map[string]float64{}
 	nan_flow_statement := map[string]map[string]map[string]map[string]float64{}
 	for _, entry := range journal {
 		date = s.parse_date(entry.date)
-		if previous_date != entry.date || previous_entry_number != entry.entry_number {
+		if previous_entry_number != entry.entry_number {
 			s.sum_flow(date, start_date, one_compound_entry, flow_statement)
 			s.sum_values(date, start_date, one_compound_entry, nan_flow_statement)
 			one_compound_entry = []journal_tag{}
@@ -658,7 +527,6 @@ func (s Financial_accounting) statement(journal []journal_tag, start_date, end_d
 		if date.Before(end_date) {
 			one_compound_entry = append(one_compound_entry, entry)
 		}
-		previous_date = entry.date
 		previous_entry_number = entry.entry_number
 	}
 	s.sum_flow(date, start_date, one_compound_entry, flow_statement)
@@ -847,18 +715,30 @@ func (s Financial_accounting) is_credit(name string) bool {
 
 func (s Financial_accounting) check_debit_equal_credit(array_of_entry []Account_value_quantity_barcode) {
 	var zero float64
-	var debit_number, credit_number int
 	for _, entry := range array_of_entry {
 		switch s.is_credit(entry.Account) {
 		case false:
 			zero += entry.value
+		case true:
+			zero -= entry.value
+		}
+	}
+	if zero != 0 {
+		log.Panic(zero, " not equal 0 if the number>0 it means debit overstated else credit overstated debit-credit should equal zero ", array_of_entry)
+	}
+}
+
+func (s Financial_accounting) check_one_debit_or_one_credit(array_of_entry []Account_value_quantity_barcode) {
+	var debit_number, credit_number int
+	for _, entry := range array_of_entry {
+		switch s.is_credit(entry.Account) {
+		case false:
 			if entry.value >= 0 {
 				debit_number++
 			} else {
 				credit_number++
 			}
 		case true:
-			zero -= entry.value
 			if entry.value <= 0 {
 				debit_number++
 			} else {
@@ -867,10 +747,72 @@ func (s Financial_accounting) check_debit_equal_credit(array_of_entry []Account_
 		}
 	}
 	if (debit_number != 1) && (credit_number != 1) {
-		// log.Panic("should be one credit or one debit in the entry")
+		log.Panic("should be one credit or one debit in the entry ", array_of_entry)
 	}
-	if zero != 0 {
-		log.Panic(zero, " not equal 0 if the number>0 it means debit overstated else credit overstated debit-credit should equal zero ", array_of_entry)
+}
+
+func (s Financial_accounting) convert_to_simple_entry(array_of_entry []Account_value_quantity_barcode) [][]Account_value_quantity_barcode {
+	var debit_entries, credit_entries []Account_value_quantity_barcode
+	for _, entry := range array_of_entry {
+		switch s.is_credit(entry.Account) {
+		case false:
+			if entry.value >= 0 {
+				debit_entries = append(debit_entries, entry)
+			} else {
+				credit_entries = append(credit_entries, entry)
+			}
+		case true:
+			if entry.value <= 0 {
+				debit_entries = append(debit_entries, entry)
+			} else {
+				credit_entries = append(credit_entries, entry)
+			}
+		}
+	}
+	simple_entries := [][]Account_value_quantity_barcode{}
+	for _, debit_entry := range debit_entries {
+		for _, credit_entry := range credit_entries {
+			simple_entries = append(simple_entries, []Account_value_quantity_barcode{debit_entry, credit_entry})
+		}
+	}
+	for _, a := range simple_entries {
+		switch math.Abs(a[0].value) >= math.Abs(a[1].value) {
+		case true:
+			sign := a[0].value / a[1].value
+			price := a[0].value / a[0].quantity
+			a[0].value = a[1].value * sign / math.Abs(sign)
+			a[0].quantity = a[0].value / price
+		case false:
+			sign := a[0].value / a[1].value
+			price := a[1].value / a[1].quantity
+			a[1].value = a[0].value * sign / math.Abs(sign)
+			a[1].quantity = a[1].value / price
+		}
+	}
+	fmt.Println(simple_entries)
+	return simple_entries
+}
+
+func (s Financial_accounting) check_one_debit_and_one_credit(array_of_entry []Account_value_quantity_barcode) {
+	var debit_number, credit_number int
+	for _, entry := range array_of_entry {
+		switch s.is_credit(entry.Account) {
+		case false:
+			if entry.value >= 0 {
+				debit_number++
+			} else {
+				credit_number++
+			}
+		case true:
+			if entry.value <= 0 {
+				debit_number++
+			} else {
+				credit_number++
+			}
+		}
+	}
+	if !((debit_number == 1) && (credit_number == 1)) {
+		log.Panic("should be one credit or one debit in the entry ", array_of_entry)
 	}
 }
 
@@ -1085,7 +1027,7 @@ func vertical_analysis(statement map[string]map[string]map[string]map[string]map
 					map_vpq["turnover_days"] = days / map_vpq["turnover"]
 					map_vpq["growth_ratio"] = map_vpq["ending_balance"] / map_vpq["beginning_balance"]
 					map_vpq["percent"] = map_vpq["ending_balance"] / ending_balance(statement, key_account_flow, key_account_flow, key_name, key_vpq)
-					map_vpq["name_percent"] = map_vpq["ending_balance"] / ending_balance(statement, key_account_flow, key_account, key_name, key_vpq)
+					map_vpq["name_percent"] = map_vpq["ending_balance"] / ending_balance(statement, key_account_flow, key_account, "all", key_vpq)
 				}
 			}
 		}
@@ -1120,6 +1062,181 @@ func calculate_price(statement map[string]map[string]map[string]map[string]map[s
 			}
 		}
 	}
+}
+
+func adjuste_the_array(entry_expair time.Time, date time.Time, array_day_start_end []day_start_end, array_to_insert []journal_tag, adjusting_method string, description string, name string, employee_name string) [][]journal_tag {
+	var day_start_end_date_minutes_array []day_start_end_date_minutes
+	var total_minutes float64
+	var previous_end_date, end time.Time
+	delta_days := int(entry_expair.Sub(date).Hours()/24 + 1)
+	year, month_sting, day := date.Date()
+	for day_counter := 0; day_counter < delta_days; day_counter++ {
+		for _, element := range array_day_start_end {
+			if start := time.Date(year, month_sting, day+day_counter, element.start_hour, element.start_minute, 0, 0, time.Local); start.Weekday().String() == element.day {
+				previous_end_date = end
+				end = time.Date(year, month_sting, day+day_counter, element.end_hour, element.end_minute, 0, 0, time.Local)
+				if start.After(end) {
+					log.Panic("the start_hour and start_minute should be smaller than end_hour and end_minute for ", element)
+				}
+				if previous_end_date.After(start) {
+					log.Panic("the end_hour and end_minute for ", element.day, " should be smaller than start_hour and start_minute for the second ", element)
+				}
+				minutes := end.Sub(start).Minutes()
+				total_minutes += minutes
+				day_start_end_date_minutes_array = append(day_start_end_date_minutes_array, day_start_end_date_minutes{element.day, start, end, minutes})
+			}
+		}
+	}
+	var adjusted_array_to_insert [][]journal_tag
+	for _, entry := range array_to_insert {
+		var value, value_counter, second_counter float64
+		var one_account_adjusted_list []journal_tag
+		total_value := math.Abs(entry.value)
+		deprecation := math.Pow(total_value, 1/total_minutes)
+		value_per_second := entry.value / total_minutes
+		for index, element := range day_start_end_date_minutes_array {
+			switch adjusting_method {
+			case "linear":
+				value = element.minutes * value_per_second
+			case "exponential":
+				value = math.Pow(deprecation, second_counter+element.minutes) - math.Pow(deprecation, second_counter)
+			case "logarithmic":
+				value = (total_value / math.Pow(deprecation, second_counter)) - (total_value / math.Pow(deprecation, second_counter+element.minutes))
+			}
+			second_counter += element.minutes
+
+			quantity := value / entry.price
+			if index >= delta_days-1 {
+				value = math.Abs(total_value - value_counter)
+				quantity = value / entry.price
+			}
+			value_counter += math.Abs(value)
+			if entry.value < 0 {
+				value = -math.Abs(value)
+			}
+			if entry.quantity < 0 {
+				quantity = -math.Abs(quantity)
+			}
+
+			one_account_adjusted_list = append(one_account_adjusted_list, journal_tag{
+				date:          element.start_date.String(),
+				entry_number:  0,
+				account:       entry.account,
+				value:         value,
+				price:         entry.price,
+				quantity:      quantity,
+				barcode:       entry.barcode,
+				entry_expair:  element.end_date.String(),
+				description:   description,
+				name:          name,
+				employee_name: employee_name,
+				entry_date:    Now.String(),
+				reverse:       false,
+			})
+		}
+		adjusted_array_to_insert = append(adjusted_array_to_insert, one_account_adjusted_list)
+	}
+	return adjusted_array_to_insert
+}
+
+func check_the_params(entry_expair time.Time, adjusting_method string, date time.Time, array_of_entry []Account_value_quantity_barcode, array_day_start_end []day_start_end) []day_start_end {
+	if entry_expair.IsZero() == is_in(adjusting_method, adjusting_methods[:]) {
+		log.Panic("check entry_expair => ", entry_expair, " and adjusting_method => ", adjusting_method, " should be in ", adjusting_methods)
+	}
+	if !entry_expair.IsZero() {
+		check_dates(date, entry_expair)
+	}
+	for _, entry := range array_of_entry {
+		if is_in(entry.Account, inventory) && !is_in(adjusting_method, []string{"expire", ""}) {
+			log.Panic(entry.Account + " is in inventory you just can use expire or make it empty")
+		}
+	}
+	if is_in(adjusting_method, depreciation_methods[:]) {
+		if len(array_day_start_end) == 0 {
+			array_day_start_end = []day_start_end{
+				{"saturday", 0, 0, 23, 59},
+				{"sunday", 0, 0, 23, 59},
+				{"monday", 0, 0, 23, 59},
+				{"tuesday", 0, 0, 23, 59},
+				{"wednesday", 0, 0, 23, 59},
+				{"thursday", 0, 0, 23, 59},
+				{"friday", 0, 0, 23, 59}}
+		}
+		for index, element := range array_day_start_end {
+			array_day_start_end[index].day = strings.Title(element.day)
+			switch {
+			case !is_in(array_day_start_end[index].day, standard_days[:]):
+				log.Panic("error ", element.day, " for ", element, " is not in ", standard_days)
+			case element.start_hour < 0:
+				log.Panic("error ", element.start_hour, " for ", element, " is < 0")
+			case element.start_hour > 23:
+				log.Panic("error ", element.start_hour, " for ", element, " is > 23")
+			case element.start_minute < 0:
+				log.Panic("error ", element.start_minute, " for ", element, " is < 0")
+			case element.start_minute > 59:
+				log.Panic("error ", element.start_minute, " for ", element, " is > 59")
+			case element.end_hour < 0:
+				log.Panic("error ", element.end_hour, " for ", element, " is < 0")
+			case element.end_hour > 23:
+				log.Panic("error ", element.end_hour, " for ", element, " is > 23")
+			case element.end_minute < 0:
+				log.Panic("error ", element.end_minute, " for ", element, " is < 0")
+			case element.end_minute > 59:
+				log.Panic("error ", element.end_minute, " for ", element, " is > 59")
+			}
+		}
+	}
+	return array_day_start_end
+}
+
+func find_barcode(array_of_entry []Account_value_quantity_barcode) {
+	for index, entry := range array_of_entry {
+		if entry.Account == "" && entry.barcode == "" {
+			log.Panic("can't find the account name if the barcode is empty in ", entry)
+		}
+		var tag string
+		if entry.Account == "" {
+			err := db.QueryRow("select account from journal where barcode=? limit 1", entry.barcode).Scan(&tag)
+			if err != nil {
+				log.Panic("the barcode is wrong for ", entry)
+			}
+			array_of_entry[index].Account = tag
+		}
+	}
+}
+
+func unpack_the_array(array_to_insert []journal_tag, adjusted_array_to_insert [][]journal_tag) []journal_tag {
+	array_to_insert = []journal_tag{}
+	for _, element := range adjusted_array_to_insert {
+		array_to_insert = append(array_to_insert, element...)
+	}
+	return array_to_insert
+}
+
+func insert_to_journal_tag(array_of_entry []Account_value_quantity_barcode, date time.Time, entry_expair time.Time, description string, name string, employee_name string) []journal_tag {
+	var array_to_insert []journal_tag
+	for _, entry := range array_of_entry {
+		price := entry.value / entry.quantity
+		if price < 0 {
+			log.Panic("the ", entry.value, " and ", entry.quantity, " for ", entry, " should be positive both or negative both")
+		}
+		array_to_insert = append(array_to_insert, journal_tag{
+			date:          date.String(),
+			entry_number:  0,
+			account:       entry.Account,
+			value:         entry.value,
+			price:         price,
+			quantity:      entry.quantity,
+			barcode:       entry.barcode,
+			entry_expair:  entry_expair.String(),
+			description:   description,
+			name:          name,
+			employee_name: employee_name,
+			entry_date:    Now.String(),
+			reverse:       false,
+		})
+	}
+	return array_to_insert
 }
 
 func select_journal(entry_number uint, account string, start_date, end_date time.Time) []journal_tag {
@@ -1553,12 +1670,14 @@ func main() {
 		accounts: []account{
 			{false, "wma", "", "assets"},
 			{false, "wma", "assets", "current_assets"},
-			{false, "wma", "current_assets", "cash_and_cash_equivalents"},
-			{false, "wma", "cash_and_cash_equivalents", "cash"},
+			{false, "", "current_assets", "cash_and_cash_equivalents"},
+			{false, "", "cash_and_cash_equivalents", "cash"},
 			{false, "wma", "current_assets", "short_term_investments"},
 			{false, "", "current_assets", "receivables"},
 			{false, "wma", "current_assets", "inventory"},
 			{false, "wma", "inventory", "book"},
+			{false, "wma", "inventory", "book1"},
+			{false, "fifo", "inventory", "panadol"},
 			{true, "", "", "liabilities"},
 			{true, "", "liabilities", "current_liabilities"},
 			{true, "", "current_liabilities", "tax"},
@@ -1588,46 +1707,42 @@ func main() {
 			{{"book", "quantity_ratio", -1, 0}, {"revenue of book", "quantity_ratio", 1, 10}, {"cost of book", "copy_abs", 0, 0}, {"tax of book", "value", 1, 1}, {"tax", "value", 1, 1}, {"discount of book", "value", 1, 1}}},
 	}
 	i.initialize()
-	// i.journal_entry([]Account_value_quantity_barcode{{"service revenue", 10, 100, ""},{"cash", 989, 989, ""}}, false, true, Now,
-	// 	time.Time{}, "", "", "yasa", "hashem", []day_start_end{})
-	// entry := select_journal(0, "cash", time.Time{}, time.Date(2026, time.January, 1, 0, 0, 0, 0, time.Local))
-	// fmt.Println(i.invoice(entry))
-	// reverse_entry(2, time.Time{}, time.Date(2026, time.January, 1, 0, 0, 0, 0, time.Local), time.Date(2025, time.January, 1, 0, 0, 0, 0, time.Local), "hashem")
-	// r := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
-	// for _, i := range entry {
-	// 	fmt.Fprintln(r, "\t", i.date, "\t", i.entry_number, "\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.barcode, "\t", i.entry_expair, "\t", i.description, "\t", i.name, "\t", i.employee_name, "\t", i.entry_date, "\t", i.reverse)
-	// }
-	// r.Flush()
+
+	p := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
+
+	// i.journal_entry([]Account_value_quantity_barcode{{"cash", 600, 600, ""}, {"panadol", 600, -177, ""}, {"sales", 262.8571428571429, 262.8571428571429, ""}}, true, false, Now,
+	// 	time.Time{}, "", "", "basma", "hashem", []day_start_end{})
+
+	// i.reverse_entry(8, "hashem")
 
 	all_flows_for_all, _, _ := i.financial_statements(
 		time.Date(2020, time.January, 1, 0, 0, 0, 0, time.Local),
-		time.Date(2022, time.January, 1, 0, 0, 0, 0, time.Local),
-		2, []string{})
+		time.Date(2022, time.December, 25, 0, 0, 0, 0, time.Local),
+		1, []string{"saba"})
 
-	// t := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
-	// fmt.Fprintln(t, "date\t", "entry_number\t", "account\t", "value\t", "price\t", "quantity\t", "barcode\t", "entry_expair\t", "description\t", "name\t", "employee_name\t", "entry_date\t", "reverse")
-	// for _, a := range journal_tag {
-	// 	fmt.Fprintln(t, a.date, "\t", a.entry_number, "\t", a.account, "\t", a.value, "\t", a.price, "\t", a.quantity, "\t", a.barcode, "\t", a.entry_expair, "\t", a.description, "\t", a.name, "\t", a.employee_name, "\t", a.entry_date, "\t", a.reverse, "\t")
+	// for _, i := range entry {
+	// 	fmt.Fprintln(p, "\t", i.date, "\t", i.entry_number, "\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.barcode, "\t", i.entry_expair, "\t", i.description, "\t", i.name, "\t", i.employee_name, "\t", i.entry_date, "\t", i.reverse)
 	// }
-	// t.Flush()
 
-	// p := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
+	// fmt.Fprintln(p, "date\t", "entry_number\t", "account\t", "value\t", "price\t", "quantity\t", "barcode\t", "entry_expair\t", "description\t", "name\t", "employee_name\t", "entry_date\t", "reverse")
+	// for _, a := range journal_tag {
+	// 	fmt.Fprintln(p, a.date, "\t", a.entry_number, "\t", a.account, "\t", a.value, "\t", a.price, "\t", a.quantity, "\t", a.barcode, "\t", a.entry_expair, "\t", a.description, "\t", a.name, "\t", a.employee_name, "\t", a.entry_date, "\t", a.reverse, "\t")
+	// }
+
 	// fmt.Fprintln(p, "current_ratio\t", "acid_test\t", "receivables_turnover\t", "inventory_turnover\t", "profit_margin\t", "asset_turnover\t", "return_on_assets\t", "return_on_equity\t", "return_on_common_stockholders_equity\t", "earnings_per_share\t", "price_earnings_ratio\t", "payout_ratio\t", "debt_to_total_assets_ratio\t", "times_interest_earned\t")
 	// for _, a := range financial_analysis_statement {
 	// 	fmt.Fprintln(p, a.current_ratio, "\t", a.acid_test, "\t", a.receivables_turnover, "\t", a.inventory_turnover, "\t", a.profit_margin, "\t", a.asset_turnover, "\t", a.return_on_assets, "\t", a.return_on_equity, "\t", a.return_on_common_stockholders_equity, "\t", a.earnings_per_share, "\t", a.price_earnings_ratio, "\t", a.payout_ratio, "\t", a.debt_to_total_assets_ratio, "\t", a.times_interest_earned, "\t")
 	// }
-	// p.Flush()
 
-	r := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
 	for _, v := range all_flows_for_all {
-		fmt.Fprintln(r, "/////////////////////////////////////////////////////////////////////////////////////////////")
+		fmt.Fprintln(p, "/////////////////////////////////////////////////////////////////////////////////////////////")
 		for keya, a := range v {
 			for keyb, b := range a {
 				for keyc, c := range b {
 					for keyd, d := range c {
 						for keye, e := range d {
-							if keya == "financial_statement" && keyd == "value" && keye == "name_percent" {
-								fmt.Fprintln(r, keya, "\t", keyb, "\t", keyc, "\t", keyd, "\t", keye, "\t", e)
+							if keya == "financial_statement" && keyc == "all" && keyd == "value" && keye == "ending_balance" {
+								fmt.Fprintln(p, keya, "\t", keyb, "\t", keyc, "\t", keyd, "\t", keye, "\t", e)
 							}
 						}
 					}
@@ -1635,29 +1750,25 @@ func main() {
 			}
 		}
 	}
-	r.Flush()
 
-	a1, ok1 := all_flows_for_all[0]["financial_statement"]["sales"]["all"]["value"]["ending_balance"]
-	a2, ok2 := all_flows_for_all[0]["financial_statement"]["sales"]["names"]["value"]["ending_balance"]
-	a3, ok3 := all_flows_for_all[0]["financial_statement"]["sales"]["yasa"]["value"]["ending_balance"]
-	fmt.Println(a1, ok1)
-	fmt.Println(a2, ok2)
-	fmt.Println(a3, ok3)
+	// a1, ok1 := all_flows_for_all[0]["financial_statement"]["panadol"]["zaid"]["value"]["ending_balance"]
+	// a2, ok2 := all_flows_for_all[0]["financial_statement"]["panadol"]["all"]["value"]["ending_balance"]
+	// fmt.Println(a1, ok1)
+	// fmt.Println(a2, ok2)
 
-	point := Managerial_Accounting{
-		cvp: []cvp{
-			{"falafel", 0, 1, 10, 0, 0},
-			{"gas", 0, 1, 0, 1, 0},
-			{"cooker", 0, 1, 0, 0, 1},
-			{"marketing", 0, 1, 0, 0, 1},
-		},
-		distribution_steps: []one_step_distribution{{"sales", "percent_from_sales", map[string]float64{"gas": 1, "cooker": 1, "marketing": 1}, map[string]float64{"falafel": 0.15}}},
-	}
-	j := point.cost_volume_profit_slice()
-	q := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
-	fmt.Fprintln(q, "name\t", "units\t", "sales_per_unit\t", "variable_cost_per_unit\t", "fixed_cost\t", "mixed_cost\t", "mixed_cost_per_unit\t", "sales\t", "profit\t", "profit_per_unit\t", "contribution_margin_per_unit\t", "contribution_margin\t", "contribution_margin_ratio\t", "break_even_in_unit\t", "break_even_in_sales\t", "degree_of_operating_leverage\t")
-	for key_name, i := range j {
-		fmt.Fprintln(q, key_name, "\t", i["units"], "\t", i["sales_per_unit"], "\t", i["variable_cost_per_unit"], "\t", i["fixed_cost"], "\t", i["mixed_cost"], "\t", i["mixed_cost_per_unit"], "\t", i["sales"], "\t", i["profit"], "\t", i["profit_per_unit"], "\t", i["contribution_margin_per_unit"], "\t", i["contribution_margin"], "\t", i["contribution_margin_ratio"], "\t", i["break_even_in_unit"], "\t", i["break_even_in_sales"], "\t", i["degree_of_operating_leverage"], "\t")
-	}
-	q.Flush()
+	// point := Managerial_Accounting{
+	// 	cvp: []cvp{
+	// 		{"falafel", 0, 1, 10, 0, 0},
+	// 		{"gas", 0, 1, 0, 1, 0},
+	// 		{"cooker", 0, 1, 0, 0, 1},
+	// 		{"marketing", 0, 1, 0, 0, 1},
+	// 	},
+	// 	distribution_steps: []one_step_distribution{{"sales", "percent_from_sales", map[string]float64{"gas": 1, "cooker": 1, "marketing": 1}, map[string]float64{"falafel": 0.15}}},
+	// }
+	// j := point.cost_volume_profit_slice()
+	// fmt.Fprintln(p, "name\t", "units\t", "sales_per_unit\t", "variable_cost_per_unit\t", "fixed_cost\t", "mixed_cost\t", "mixed_cost_per_unit\t", "sales\t", "profit\t", "profit_per_unit\t", "contribution_margin_per_unit\t", "contribution_margin\t", "contribution_margin_ratio\t", "break_even_in_unit\t", "break_even_in_sales\t", "degree_of_operating_leverage\t")
+	// for key_name, i := range j {
+	// 	fmt.Fprintln(p, key_name, "\t", i["units"], "\t", i["sales_per_unit"], "\t", i["variable_cost_per_unit"], "\t", i["fixed_cost"], "\t", i["mixed_cost"], "\t", i["mixed_cost_per_unit"], "\t", i["sales"], "\t", i["profit"], "\t", i["profit_per_unit"], "\t", i["contribution_margin_per_unit"], "\t", i["contribution_margin"], "\t", i["contribution_margin_ratio"], "\t", i["break_even_in_unit"], "\t", i["break_even_in_sales"], "\t", i["degree_of_operating_leverage"], "\t")
+	// }
+	p.Flush()
 }
