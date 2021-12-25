@@ -579,30 +579,30 @@ func (s Financial_accounting) statement(journal []journal_tag, start_date, end_d
 
 func (s Financial_accounting) sum_values(date, start_date time.Time, one_simple_entry []journal_tag, nan_flow_statement map[string]map[string]map[string]map[string]float64) {
 	for _, b := range one_simple_entry {
-		initialize_map_3(nan_flow_statement, b.account, b.name, "value")
-		initialize_map_3(nan_flow_statement, b.account, b.name, "quantity")
-		initialize_map_3(nan_flow_statement, s.retained_earnings, b.name, "value")
-		initialize_map_3(nan_flow_statement, s.retained_earnings, b.name, "quantity")
+		map_v1 := initialize_map_3(nan_flow_statement, b.account, b.name, "value")
+		map_q1 := initialize_map_3(nan_flow_statement, b.account, b.name, "quantity")
+		map_v2 := initialize_map_3(nan_flow_statement, s.retained_earnings, b.name, "value")
+		map_q2 := initialize_map_3(nan_flow_statement, s.retained_earnings, b.name, "quantity")
 		if date.Before(start_date) {
 			switch {
 			case s.is_father(s.retained_earnings, b.account) && s.is_credit(b.account):
-				nan_flow_statement[s.retained_earnings][b.name]["value"]["beginning_balance"] += b.value
-				nan_flow_statement[s.retained_earnings][b.name]["quantity"]["beginning_balance"] += b.quantity
+				map_v2["beginning_balance"] += b.value
+				map_q2["beginning_balance"] += b.quantity
 			case s.is_father(s.retained_earnings, b.account) && !s.is_credit(b.account):
-				nan_flow_statement[s.retained_earnings][b.name]["value"]["beginning_balance"] -= b.value
-				nan_flow_statement[s.retained_earnings][b.name]["quantity"]["beginning_balance"] -= b.quantity
+				map_v2["beginning_balance"] -= b.value
+				map_q2["beginning_balance"] -= b.quantity
 			default:
-				nan_flow_statement[b.account][b.name]["value"]["beginning_balance"] += b.value
-				nan_flow_statement[b.account][b.name]["quantity"]["beginning_balance"] += b.quantity
+				map_v1["beginning_balance"] += b.value
+				map_q1["beginning_balance"] += b.quantity
 			}
 		}
 		if date.After(start_date) {
 			if b.value >= 0 {
-				nan_flow_statement[b.account][b.name]["value"]["increase"] += math.Abs(b.value)
-				nan_flow_statement[b.account][b.name]["quantity"]["increase"] += math.Abs(b.quantity)
+				map_v1["increase"] += math.Abs(b.value)
+				map_q1["increase"] += math.Abs(b.quantity)
 			} else {
-				nan_flow_statement[b.account][b.name]["value"]["decrease"] += math.Abs(b.value)
-				nan_flow_statement[b.account][b.name]["quantity"]["decrease"] += math.Abs(b.quantity)
+				map_v1["decrease"] += math.Abs(b.value)
+				map_q1["decrease"] += math.Abs(b.quantity)
 			}
 		}
 	}
@@ -611,13 +611,13 @@ func (s Financial_accounting) sum_values(date, start_date time.Time, one_simple_
 func (s Financial_accounting) sum_flow(date, start_date time.Time, one_simple_entry []journal_tag, flow_statement map[string]map[string]map[string]map[string]map[string]float64) {
 	for _, a := range one_simple_entry {
 		for _, b := range one_simple_entry {
-			initialize_map_4(flow_statement, a.account, b.account, b.name, "value")
-			initialize_map_4(flow_statement, a.account, b.account, b.name, "quantity")
+			map_v := initialize_map_4(flow_statement, a.account, b.account, b.name, "value")
+			map_q := initialize_map_4(flow_statement, a.account, b.account, b.name, "quantity")
 			if date.After(start_date) {
 				if b.account == a.account || s.is_credit(b.account) != s.is_credit(a.account) {
-					sum_flows(a, b, 1, flow_statement)
+					sum_flows(b, 1, map_v, map_q)
 				} else {
-					sum_flows(a, b, -1, flow_statement)
+					sum_flows(b, -1, map_v, map_q)
 				}
 			}
 		}
@@ -630,21 +630,21 @@ func (s Financial_accounting) prepare_statement(statement map[string]map[string]
 			for key_account, map_account := range map_account_flow {
 				for key_name, map_name := range map_account {
 					for key_vpq, map_vpq := range map_name {
-						initialize_map_4(statement, "financial_statement", key_account, key_name, key_vpq)
+						map_vpq1 := initialize_map_4(statement, "financial_statement", key_account, key_name, key_vpq)
 						for key_number, number := range map_vpq {
-							statement["financial_statement"][key_account][key_name][key_vpq][key_number] = number
+							map_vpq1[key_number] = number
 							if !s.is_father(s.income_statement, key_account) {
-								statement["financial_statement"][key_account][key_name][key_vpq]["percent"] = statement[s.income_statement][key_account][key_name][key_vpq]["percent"]
+								map_vpq1["percent"] = statement[s.income_statement][key_account][key_name][key_vpq]["percent"]
 							} else {
-								statement["financial_statement"][key_account][key_name][key_vpq]["percent"] = statement[s.assets][key_account][key_name][key_vpq]["percent"]
+								map_vpq1["percent"] = statement[s.assets][key_account][key_name][key_vpq]["percent"]
 							}
 							switch {
 							case s.is_father(s.inventory, key_account):
-								statement["financial_statement"][key_account][key_name][key_vpq]["turnover"] = statement[s.cost_of_goods_sold][key_account][key_name][key_vpq]["turnover"]
-								statement["financial_statement"][key_account][key_name][key_vpq]["turnover_days"] = statement[s.cost_of_goods_sold][key_account][key_name][key_vpq]["turnover_days"]
+								map_vpq1["turnover"] = statement[s.cost_of_goods_sold][key_account][key_name][key_vpq]["turnover"]
+								map_vpq1["turnover_days"] = statement[s.cost_of_goods_sold][key_account][key_name][key_vpq]["turnover_days"]
 							case s.is_father(s.assets, key_account):
-								statement["financial_statement"][key_account][key_name][key_vpq]["turnover"] = statement[s.sales][key_account][key_name][key_vpq]["turnover"]
-								statement["financial_statement"][key_account][key_name][key_vpq]["turnover_days"] = statement[s.sales][key_account][key_name][key_vpq]["turnover_days"]
+								map_vpq1["turnover"] = statement[s.sales][key_account][key_name][key_vpq]["turnover"]
+								map_vpq1["turnover_days"] = statement[s.sales][key_account][key_name][key_vpq]["turnover_days"]
 							}
 						}
 					}
@@ -802,17 +802,17 @@ func (s Financial_accounting) sum_1st_column(statement map[string]map[string]map
 				for key_account, map_account := range map_account_flow {
 					for key_name, map_name := range map_account {
 						for key_vpq, map_vpq := range map_name {
-							initialize_map_4(new_statement, a.name, key_account, key_name, key_vpq)
+							map_vpq1 := initialize_map_4(new_statement, a.name, key_account, key_name, key_vpq)
 							for key_number, number := range map_vpq {
 								switch {
 								case is_in(key_number, []string{"inflow", "outflow"}):
 									if s.is_credit(a.name) == s.is_credit(key_account_flow) {
-										new_statement[a.name][key_account][key_name][key_vpq][key_number] += number
+										map_vpq1[key_number] += number
 									} else {
-										new_statement[a.name][key_account][key_name][key_vpq][key_number] -= number
+										map_vpq1[key_number] -= number
 									}
 								default:
-									new_statement[a.name][key_account][key_name][key_vpq][key_number] = number
+									map_vpq1[key_number] = number
 								}
 							}
 						}
@@ -837,17 +837,17 @@ func (s Financial_accounting) sum_2nd_column(statement map[string]map[string]map
 						key_account = ss.father
 						for key_name, map_name := range map_account {
 							for key_vpq, map_vpq := range map_name {
-								initialize_map_4(new_statement, key_account_flow, ss.name, key_name, key_vpq)
+								map_vpq1 := initialize_map_4(new_statement, key_account_flow, ss.name, key_name, key_vpq)
 								for key_number, number := range map_vpq {
 									switch {
 									case !is_in(key_number, []string{"inflow", "outflow"}):
 										if s.is_credit(key1) == s.is_credit(ss.name) {
-											new_statement[key_account_flow][ss.name][key_name][key_vpq][key_number] += number
+											map_vpq1[key_number] += number
 										} else {
-											new_statement[key_account_flow][ss.name][key_name][key_vpq][key_number] -= number
+											map_vpq1[key_number] -= number
 										}
 									case key_account_flow != key1:
-										new_statement[key_account_flow][ss.name][key_name][key_vpq][key_number] += number
+										map_vpq1[key_number] += number
 									case key_account_flow == ss.name:
 										new_statement[key_account_flow][key1][key_name][key_vpq][key_number] += number
 									}
@@ -899,9 +899,9 @@ func combine_statements(flow_statement map[string]map[string]map[string]map[stri
 		for key_account, map_account := range nan_flow_statement {
 			for key_name, map_name := range map_account {
 				for key_vpq, map_vpq := range map_name {
-					initialize_map_4(flow_statement, key_account_flow, key_account, key_name, key_vpq)
+					map_vpq1 := initialize_map_4(flow_statement, key_account_flow, key_account, key_name, key_vpq)
 					for key_number, _ := range map_vpq {
-						flow_statement[key_account_flow][key_account][key_name][key_vpq][key_number] = map_vpq[key_number]
+						map_vpq1[key_number] = map_vpq[key_number]
 					}
 				}
 			}
@@ -910,13 +910,13 @@ func combine_statements(flow_statement map[string]map[string]map[string]map[stri
 	return flow_statement
 }
 
-func sum_flows(a journal_tag, b journal_tag, x float64, flow_statement map[string]map[string]map[string]map[string]map[string]float64) {
+func sum_flows(b journal_tag, x float64, map_v, map_q map[string]float64) {
 	if b.value*x < 0 {
-		flow_statement[a.account][b.account][b.name]["value"]["outflow"] += math.Abs(b.value)
-		flow_statement[a.account][b.account][b.name]["quantity"]["outflow"] += math.Abs(b.quantity)
+		map_v["outflow"] += math.Abs(b.value)
+		map_q["outflow"] += math.Abs(b.quantity)
 	} else {
-		flow_statement[a.account][b.account][b.name]["value"]["inflow"] += math.Abs(b.value)
-		flow_statement[a.account][b.account][b.name]["quantity"]["inflow"] += math.Abs(b.quantity)
+		map_v["inflow"] += math.Abs(b.value)
+		map_q["inflow"] += math.Abs(b.quantity)
 	}
 }
 
@@ -974,7 +974,7 @@ func calculate_price(statement map[string]map[string]map[string]map[string]map[s
 	}
 }
 
-func initialize_map_4(m map[string]map[string]map[string]map[string]map[string]float64, a, b, c, d string) {
+func initialize_map_4(m map[string]map[string]map[string]map[string]map[string]float64, a, b, c, d string) map[string]float64 {
 	if m[a] == nil {
 		m[a] = map[string]map[string]map[string]map[string]float64{}
 	}
@@ -987,9 +987,10 @@ func initialize_map_4(m map[string]map[string]map[string]map[string]map[string]f
 	if m[a][b][c][d] == nil {
 		m[a][b][c][d] = map[string]float64{}
 	}
+	return m[a][b][c][d]
 }
 
-func initialize_map_3(m map[string]map[string]map[string]map[string]float64, a, b, c string) {
+func initialize_map_3(m map[string]map[string]map[string]map[string]float64, a, b, c string) map[string]float64 {
 	if m[a] == nil {
 		m[a] = map[string]map[string]map[string]float64{}
 	}
@@ -999,6 +1000,7 @@ func initialize_map_3(m map[string]map[string]map[string]map[string]float64, a, 
 	if m[a][b][c] == nil {
 		m[a][b][c] = map[string]float64{}
 	}
+	return m[a][b][c]
 }
 
 func adjuste_the_array(entry_expair time.Time, date time.Time, array_day_start_end []day_start_end, array_to_insert []journal_tag, adjusting_method string, description string, name string, employee_name string) [][]journal_tag {
