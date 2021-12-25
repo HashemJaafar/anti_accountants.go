@@ -246,7 +246,7 @@ func (s Financial_accounting) initialize() {
 		var tag Account_value_quantity_barcode
 		rows.Scan(&entry_number, &tag.Account, &tag.value)
 		if previous_entry_number != entry_number {
-			s.check_one_debit_or_one_credit(double_entry, true)
+			s.check_debit_equal_credit(double_entry, true)
 			journal = append(journal, double_entry)
 			double_entry = []Account_value_quantity_barcode{}
 		}
@@ -266,7 +266,7 @@ func (s Financial_accounting) journal_entry(array_of_entry []Account_value_quant
 	array_of_entry = group_by_account_and_barcode(array_of_entry)
 	array_of_entry = remove_zero_values(array_of_entry)
 	s.can_the_account_be_negative(array_of_entry)
-	debit_entries, credit_entries := s.check_one_debit_or_one_credit(array_of_entry, false)
+	debit_entries, credit_entries := s.check_debit_equal_credit(array_of_entry, false)
 	simple_entries := s.convert_to_simple_entry(debit_entries, credit_entries)
 	var all_array_to_insert []journal_tag
 	for _, simple_entry := range simple_entries {
@@ -282,7 +282,7 @@ func (s Financial_accounting) journal_entry(array_of_entry []Account_value_quant
 	return all_array_to_insert
 }
 
-func (s Financial_accounting) financial_statements(start_date, end_date time.Time, periods int, names []string) ([]map[string]map[string]map[string]map[string]map[string]float64, []financial_analysis_statement, []journal_tag) {
+func (s Financial_accounting) financial_statements(start_date, end_date time.Time, periods int, names []string, in_names bool) ([]map[string]map[string]map[string]map[string]map[string]float64, []financial_analysis_statement, []journal_tag) {
 	check_dates(start_date, end_date)
 	days := int(end_date.Sub(start_date).Hours() / 24)
 	var journal []journal_tag
@@ -298,8 +298,8 @@ func (s Financial_accounting) financial_statements(start_date, end_date time.Tim
 		statement := combine_statements(flow_statement, nan_flow_statement)
 		statement = s.sum_1st_column(statement)
 		statement = s.sum_2nd_column(statement)
-		sum_3rd_column(statement, []string{}, []string{}, "all")
-		sum_3rd_column(statement, names, []string{"all"}, "names")
+		sum_3rd_column(statement, []string{}, []string{}, "all", false)
+		sum_3rd_column(statement, names, []string{"all"}, "names", in_names)
 		vertical_analysis(statement, float64(days))
 		statements = append(statements, statement)
 	}
@@ -579,30 +579,10 @@ func (s Financial_accounting) statement(journal []journal_tag, start_date, end_d
 
 func (s Financial_accounting) sum_values(date, start_date time.Time, one_simple_entry []journal_tag, nan_flow_statement map[string]map[string]map[string]map[string]float64) {
 	for _, b := range one_simple_entry {
-		if nan_flow_statement[b.account] == nil {
-			nan_flow_statement[b.account] = map[string]map[string]map[string]float64{}
-		}
-		if nan_flow_statement[b.account][b.name] == nil {
-			nan_flow_statement[b.account][b.name] = map[string]map[string]float64{}
-		}
-		if nan_flow_statement[b.account][b.name]["value"] == nil {
-			nan_flow_statement[b.account][b.name]["value"] = map[string]float64{}
-		}
-		if nan_flow_statement[b.account][b.name]["quantity"] == nil {
-			nan_flow_statement[b.account][b.name]["quantity"] = map[string]float64{}
-		}
-		if nan_flow_statement[s.retained_earnings] == nil {
-			nan_flow_statement[s.retained_earnings] = map[string]map[string]map[string]float64{}
-		}
-		if nan_flow_statement[s.retained_earnings][b.name] == nil {
-			nan_flow_statement[s.retained_earnings][b.name] = map[string]map[string]float64{}
-		}
-		if nan_flow_statement[s.retained_earnings][b.name]["value"] == nil {
-			nan_flow_statement[s.retained_earnings][b.name]["value"] = map[string]float64{}
-		}
-		if nan_flow_statement[s.retained_earnings][b.name]["quantity"] == nil {
-			nan_flow_statement[s.retained_earnings][b.name]["quantity"] = map[string]float64{}
-		}
+		initialize_map_3(nan_flow_statement, b.account, b.name, "value")
+		initialize_map_3(nan_flow_statement, b.account, b.name, "quantity")
+		initialize_map_3(nan_flow_statement, s.retained_earnings, b.name, "value")
+		initialize_map_3(nan_flow_statement, s.retained_earnings, b.name, "quantity")
 		if date.Before(start_date) {
 			switch {
 			case s.is_father(s.retained_earnings, b.account) && s.is_credit(b.account):
@@ -630,22 +610,9 @@ func (s Financial_accounting) sum_values(date, start_date time.Time, one_simple_
 
 func (s Financial_accounting) sum_flow(date, start_date time.Time, one_simple_entry []journal_tag, flow_statement map[string]map[string]map[string]map[string]map[string]float64) {
 	for _, a := range one_simple_entry {
-		if flow_statement[a.account] == nil {
-			flow_statement[a.account] = map[string]map[string]map[string]map[string]float64{}
-		}
 		for _, b := range one_simple_entry {
-			if flow_statement[a.account][b.account] == nil {
-				flow_statement[a.account][b.account] = map[string]map[string]map[string]float64{}
-			}
-			if flow_statement[a.account][b.account][b.name] == nil {
-				flow_statement[a.account][b.account][b.name] = map[string]map[string]float64{}
-			}
-			if flow_statement[a.account][b.account][b.name]["value"] == nil {
-				flow_statement[a.account][b.account][b.name]["value"] = map[string]float64{}
-			}
-			if flow_statement[a.account][b.account][b.name]["quantity"] == nil {
-				flow_statement[a.account][b.account][b.name]["quantity"] = map[string]float64{}
-			}
+			initialize_map_4(flow_statement, a.account, b.account, b.name, "value")
+			initialize_map_4(flow_statement, a.account, b.account, b.name, "quantity")
 			if date.After(start_date) {
 				if b.account == a.account || s.is_credit(b.account) != s.is_credit(a.account) {
 					sum_flows(a, b, 1, flow_statement)
@@ -660,21 +627,10 @@ func (s Financial_accounting) sum_flow(date, start_date time.Time, one_simple_en
 func (s Financial_accounting) prepare_statement(statement map[string]map[string]map[string]map[string]map[string]float64) {
 	for key_account_flow, map_account_flow := range statement {
 		if key_account_flow == s.cash_and_cash_equivalents {
-			if statement["financial_statement"] == nil {
-				statement["financial_statement"] = map[string]map[string]map[string]map[string]float64{}
-			}
 			for key_account, map_account := range map_account_flow {
-				if statement["financial_statement"][key_account] == nil {
-					statement["financial_statement"][key_account] = map[string]map[string]map[string]float64{}
-				}
 				for key_name, map_name := range map_account {
-					if statement["financial_statement"][key_account][key_name] == nil {
-						statement["financial_statement"][key_account][key_name] = map[string]map[string]float64{}
-					}
 					for key_vpq, map_vpq := range map_name {
-						if statement["financial_statement"][key_account][key_name][key_vpq] == nil {
-							statement["financial_statement"][key_account][key_name][key_vpq] = map[string]float64{}
-						}
+						initialize_map_4(statement, "financial_statement", key_account, key_name, key_vpq)
 						for key_number, number := range map_vpq {
 							statement["financial_statement"][key_account][key_name][key_vpq][key_number] = number
 							if !s.is_father(s.income_statement, key_account) {
@@ -746,7 +702,7 @@ func (s Financial_accounting) is_credit(name string) bool {
 	return false
 }
 
-func (s Financial_accounting) check_one_debit_or_one_credit(array_of_entry []Account_value_quantity_barcode, check_one_debit_and_one_credit bool) ([]Account_value_quantity_barcode, []Account_value_quantity_barcode) {
+func (s Financial_accounting) check_debit_equal_credit(array_of_entry []Account_value_quantity_barcode, check_one_debit_and_one_credit bool) ([]Account_value_quantity_barcode, []Account_value_quantity_barcode) {
 	var debit_entries, credit_entries []Account_value_quantity_barcode
 	var zero float64
 	for _, entry := range array_of_entry {
@@ -843,21 +799,10 @@ func (s Financial_accounting) sum_1st_column(statement map[string]map[string]map
 		}
 		for key_account_flow, map_account_flow := range statement {
 			if is_in(key_account_flow, flow_accounts) {
-				if new_statement[a.name] == nil {
-					new_statement[a.name] = map[string]map[string]map[string]map[string]float64{}
-				}
 				for key_account, map_account := range map_account_flow {
-					if new_statement[a.name][key_account] == nil {
-						new_statement[a.name][key_account] = map[string]map[string]map[string]float64{}
-					}
 					for key_name, map_name := range map_account {
-						if new_statement[a.name][key_account][key_name] == nil {
-							new_statement[a.name][key_account][key_name] = map[string]map[string]float64{}
-						}
 						for key_vpq, map_vpq := range map_name {
-							if new_statement[a.name][key_account][key_name][key_vpq] == nil {
-								new_statement[a.name][key_account][key_name][key_vpq] = map[string]float64{}
-							}
+							initialize_map_4(new_statement, a.name, key_account, key_name, key_vpq)
 							for key_number, number := range map_vpq {
 								switch {
 								case is_in(key_number, []string{"inflow", "outflow"}):
@@ -883,9 +828,6 @@ func (s Financial_accounting) sum_1st_column(statement map[string]map[string]map
 func (s Financial_accounting) sum_2nd_column(statement map[string]map[string]map[string]map[string]map[string]float64) map[string]map[string]map[string]map[string]map[string]float64 {
 	new_statement := map[string]map[string]map[string]map[string]map[string]float64{}
 	for key_account_flow, map_account_flow := range statement {
-		if new_statement[key_account_flow] == nil {
-			new_statement[key_account_flow] = map[string]map[string]map[string]map[string]float64{}
-		}
 		for key_account, map_account := range map_account_flow {
 			var last_name string
 			key1 := key_account
@@ -893,17 +835,9 @@ func (s Financial_accounting) sum_2nd_column(statement map[string]map[string]map
 				for _, ss := range s.accounts {
 					if ss.name == key_account {
 						key_account = ss.father
-						if new_statement[key_account_flow][ss.name] == nil {
-							new_statement[key_account_flow][ss.name] = map[string]map[string]map[string]float64{}
-						}
 						for key_name, map_name := range map_account {
-							if new_statement[key_account_flow][ss.name][key_name] == nil {
-								new_statement[key_account_flow][ss.name][key_name] = map[string]map[string]float64{}
-							}
 							for key_vpq, map_vpq := range map_name {
-								if new_statement[key_account_flow][ss.name][key_name][key_vpq] == nil {
-									new_statement[key_account_flow][ss.name][key_name][key_vpq] = map[string]float64{}
-								}
+								initialize_map_4(new_statement, key_account_flow, ss.name, key_name, key_vpq)
 								for key_number, number := range map_vpq {
 									switch {
 									case !is_in(key_number, []string{"inflow", "outflow"}):
@@ -932,7 +866,7 @@ func (s Financial_accounting) sum_2nd_column(statement map[string]map[string]map
 	return new_statement
 }
 
-func sum_3rd_column(statement map[string]map[string]map[string]map[string]map[string]float64, names, exempt_names []string, name string) {
+func sum_3rd_column(statement map[string]map[string]map[string]map[string]map[string]float64, names, exempt_names []string, name string, in_names bool) {
 	for _, map_account_flow := range statement {
 		for _, map_account := range map_account_flow {
 			if map_account[name] == nil {
@@ -941,9 +875,7 @@ func sum_3rd_column(statement map[string]map[string]map[string]map[string]map[st
 			for key_name, map_name := range map_account {
 				var ok bool
 				if !is_in(key_name, append(exempt_names, name)) {
-					if len(names) == 0 {
-						ok = true
-					} else if is_in(key_name, names) {
+					if is_in(key_name, names) == in_names {
 						ok = true
 					}
 					if ok {
@@ -964,21 +896,10 @@ func sum_3rd_column(statement map[string]map[string]map[string]map[string]map[st
 
 func combine_statements(flow_statement map[string]map[string]map[string]map[string]map[string]float64, nan_flow_statement map[string]map[string]map[string]map[string]float64) map[string]map[string]map[string]map[string]map[string]float64 {
 	for key_account_flow, _ := range nan_flow_statement {
-		if flow_statement[key_account_flow] == nil {
-			flow_statement[key_account_flow] = map[string]map[string]map[string]map[string]float64{}
-		}
 		for key_account, map_account := range nan_flow_statement {
-			if flow_statement[key_account_flow][key_account] == nil {
-				flow_statement[key_account_flow][key_account] = map[string]map[string]map[string]float64{}
-			}
 			for key_name, map_name := range map_account {
-				if flow_statement[key_account_flow][key_account][key_name] == nil {
-					flow_statement[key_account_flow][key_account][key_name] = map[string]map[string]float64{}
-				}
 				for key_vpq, map_vpq := range map_name {
-					if flow_statement[key_account_flow][key_account][key_name][key_vpq] == nil {
-						flow_statement[key_account_flow][key_account][key_name][key_vpq] = map[string]float64{}
-					}
+					initialize_map_4(flow_statement, key_account_flow, key_account, key_name, key_vpq)
 					for key_number, _ := range map_vpq {
 						flow_statement[key_account_flow][key_account][key_name][key_vpq][key_number] = map_vpq[key_number]
 					}
@@ -1050,6 +971,33 @@ func calculate_price(statement map[string]map[string]map[string]map[string]map[s
 				}
 			}
 		}
+	}
+}
+
+func initialize_map_4(m map[string]map[string]map[string]map[string]map[string]float64, a, b, c, d string) {
+	if m[a] == nil {
+		m[a] = map[string]map[string]map[string]map[string]float64{}
+	}
+	if m[a][b] == nil {
+		m[a][b] = map[string]map[string]map[string]float64{}
+	}
+	if m[a][b][c] == nil {
+		m[a][b][c] = map[string]map[string]float64{}
+	}
+	if m[a][b][c][d] == nil {
+		m[a][b][c][d] = map[string]float64{}
+	}
+}
+
+func initialize_map_3(m map[string]map[string]map[string]map[string]float64, a, b, c string) {
+	if m[a] == nil {
+		m[a] = map[string]map[string]map[string]float64{}
+	}
+	if m[a][b] == nil {
+		m[a][b] = map[string]map[string]float64{}
+	}
+	if m[a][b][c] == nil {
+		m[a][b][c] = map[string]float64{}
 	}
 }
 
@@ -1707,9 +1655,9 @@ func main() {
 	all_financial_statements, _, _ := i.financial_statements(
 		time.Date(2020, time.January, 1, 0, 0, 0, 0, time.Local),
 		time.Date(2022, time.December, 25, 0, 0, 0, 0, time.Local),
-		1, []string{"saba"})
+		1, []string{}, false)
 
-	filtered_statement := i.statement_filter(all_financial_statements, []string{"financial_statement"}, []string{}, []string{"basma"}, []string{"value"}, []string{"ending_balance"}, true, false, true, true, true)
+	filtered_statement := i.statement_filter(all_financial_statements, []string{"cash", "book"}, []string{"cash", "book"}, []string{"names", "all"}, []string{"value"}, []string{"flow"}, true, true, true, true, true)
 
 	// for _, i := range entry {
 	// 	fmt.Fprintln(p, "\t", i.date, "\t", i.entry_number, "\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.barcode, "\t", i.entry_expair, "\t", i.description, "\t", i.name, "\t", i.employee_name, "\t", i.entry_date, "\t", i.reverse)
@@ -1731,8 +1679,8 @@ func main() {
 		}
 	}
 
-	// a1, ok1 := all_financial_statements[0]["financial_statement"]["panadol"]["zaid"]["value"]["ending_balance"]
-	// a2, ok2 := all_financial_statements[0]["financial_statement"]["panadol"]["all"]["value"]["ending_balance"]
+	// a1, ok1 := all_financial_statements[0]["panadol"]["cash"]["zaid"]["value"]["inflow"]
+	// a2, ok2 := all_financial_statements[0]["cash"]["panadol"]["zaid"]["value"]["outflow"]
 	// fmt.Println(a1, ok1)
 	// fmt.Println(a2, ok2)
 
