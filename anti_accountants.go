@@ -123,11 +123,6 @@ type filtered_statement struct {
 	number                                                       float64
 }
 
-type cvp struct {
-	name                                                                 string
-	units_gap, units, sales_per_unit, variable_cost_per_unit, fixed_cost float64
-}
-
 type one_step_distribution struct {
 	sales_or_variable_or_fixed, distribution_method string
 	from, to                                        map[string]float64
@@ -135,7 +130,7 @@ type one_step_distribution struct {
 
 type Managerial_Accounting struct {
 	points_activity_level_and_cost_at_the_activity_level [][2]float64
-	cvp                                                  []cvp
+	cvp                                                  map[string]map[string]float64
 	distribution_steps                                   []one_step_distribution
 	beginning_balance,
 	increase,
@@ -1384,92 +1379,153 @@ func (s Managerial_Accounting) cost_of_goods_sold() float64 {
 	return s.decrease() - s.decreases_in_account_caused_by_not_sell
 }
 
-func (s Managerial_Accounting) cost_volume_profit_slice() map[string]map[string]float64 {
-	m := map[string]map[string]float64{}
-	for _, i := range s.cvp {
-		cost_volume_profit(m, i.name, i.units_gap, i.units, i.sales_per_unit, i.variable_cost_per_unit, i.fixed_cost)
-	}
+func (s Managerial_Accounting) cost_volume_profit_slice() {
+	s.check_map_keys()
+	s.calculate_cvp_map()
 	for _, step := range s.distribution_steps {
-		var total_mixed_cost, total_portions_from, total_portions_to, total_distribution_method float64
-		for key_portions, portions := range step.from {
-			if m[key_portions]["units"] < portions {
-				log.Panic(portions, " for ", key_portions, " in ", step.from, " is more than ", m[key_portions]["units"])
+		var total_mixed_cost, total_portions_to, total_column_to_distribute float64
+		for key_portions_from, portions := range step.from {
+			if s.cvp[key_portions_from]["units"] < portions {
+				log.Panic(portions, " for ", key_portions_from, " in ", step.from, " is more than ", s.cvp[key_portions_from]["units"])
 			}
-			total_mixed_cost += portions * m[key_portions]["mixed_cost_per_unit"]
-			total_portions_from += portions
-			m[key_portions]["fixed_cost"] -= (m[key_portions]["fixed_cost"] / m[key_portions]["units"]) * portions
-			m[key_portions]["units"] -= portions
-			if m[key_portions]["units"] == 0 {
-				m[key_portions]["variable_cost_per_unit"] = 0
+			total_mixed_cost += portions * s.cvp[key_portions_from]["mixed_cost_per_units"]
+			s.cvp[key_portions_from]["fixed_cost"] -= (s.cvp[key_portions_from]["fixed_cost"] / s.cvp[key_portions_from]["units"]) * portions
+			s.cvp[key_portions_from]["units"] -= portions
+			if s.cvp[key_portions_from]["units"] == 0 {
+				s.cvp[key_portions_from]["variable_cost_per_units"] = 0
 			}
 		}
-		for key_portions, portions := range step.to {
-			total_portions_to += portions
-			total_distribution_method += m[key_portions][step.distribution_method]
+		for key_portions_to, portions_to := range step.to {
+			total_portions_to += portions_to
+			total_column_to_distribute += s.cvp[key_portions_to][step.distribution_method]
 		}
-		for key_portions, portions := range step.to {
+		for key_portions_to, portions_to := range step.to {
 			var total_overhead_cost_to_sum float64
 			switch step.distribution_method {
 			case "units_gap":
-				total_overhead_cost_to_sum = m[key_portions]["units_gap"] * m[key_portions]["variable_cost_per_unit"]
-				m[key_portions]["units"] -= m[key_portions]["units_gap"]
-				m[key_portions]["units_gap"] = 0
+				total_overhead_cost_to_sum = s.cvp[key_portions_to]["units_gap"] * s.cvp[key_portions_to]["variable_cost_per_units"]
+				s.cvp[key_portions_to]["units"] -= s.cvp[key_portions_to]["units_gap"]
+				s.cvp[key_portions_to]["units_gap"] = 0
 			case "1":
 				total_overhead_cost_to_sum = total_mixed_cost
 			case "equally":
-				total_overhead_cost_to_sum = total_mixed_cost / float64(len(step.to))
+				total_overhead_cost_to_sum = float64(len(step.to)) * total_mixed_cost
 			case "portions":
-				total_overhead_cost_to_sum = total_mixed_cost * portions / total_portions_to
+				total_overhead_cost_to_sum = portions_to / total_portions_to * total_mixed_cost
 			case "units":
-				total_overhead_cost_to_sum = total_mixed_cost * m[key_portions]["units"] / total_distribution_method
-
+				total_overhead_cost_to_sum = s.cvp[key_portions_to]["units"] / total_column_to_distribute * total_mixed_cost
 			case "variable_cost":
-				total_overhead_cost_to_sum = total_mixed_cost * m[key_portions]["variable_cost"] / total_distribution_method
+				total_overhead_cost_to_sum = s.cvp[key_portions_to]["variable_cost"] / total_column_to_distribute * total_mixed_cost
 			case "fixed_cost":
-				total_overhead_cost_to_sum = total_mixed_cost * m[key_portions]["fixed_cost"] / total_distribution_method
+				total_overhead_cost_to_sum = s.cvp[key_portions_to]["fixed_cost"] / total_column_to_distribute * total_mixed_cost
 			case "mixed_cost":
-				total_overhead_cost_to_sum = total_mixed_cost * m[key_portions]["mixed_cost"] / total_distribution_method
+				total_overhead_cost_to_sum = s.cvp[key_portions_to]["mixed_cost"] / total_column_to_distribute * total_mixed_cost
 			case "sales":
-				total_overhead_cost_to_sum = total_mixed_cost * m[key_portions]["sales"] / total_distribution_method
+				total_overhead_cost_to_sum = s.cvp[key_portions_to]["sales"] / total_column_to_distribute * total_mixed_cost
 			case "profit":
-				total_overhead_cost_to_sum = total_mixed_cost * m[key_portions]["profit"] / total_distribution_method
+				total_overhead_cost_to_sum = s.cvp[key_portions_to]["profit"] / total_column_to_distribute * total_mixed_cost
 			case "contribution_margin":
-				total_overhead_cost_to_sum = total_mixed_cost * m[key_portions]["contribution_margin"] / total_distribution_method
-
+				total_overhead_cost_to_sum = s.cvp[key_portions_to]["contribution_margin"] / total_column_to_distribute * total_mixed_cost
 			case "percent_from_variable_cost":
-				total_overhead_cost_to_sum = portions * m[key_portions]["variable_cost"]
+				total_overhead_cost_to_sum = s.cvp[key_portions_to]["variable_cost"] * portions_to
 			case "percent_from_fixed_cost":
-				total_overhead_cost_to_sum = portions * m[key_portions]["fixed_cost"]
+				total_overhead_cost_to_sum = s.cvp[key_portions_to]["fixed_cost"] * portions_to
 			case "percent_from_mixed_cost":
-				total_overhead_cost_to_sum = portions * m[key_portions]["mixed_cost"]
+				total_overhead_cost_to_sum = s.cvp[key_portions_to]["mixed_cost"] * portions_to
 			case "percent_from_sales":
-				total_overhead_cost_to_sum = portions * m[key_portions]["sales"]
+				total_overhead_cost_to_sum = s.cvp[key_portions_to]["sales"] * portions_to
 			case "percent_from_profit":
-				total_overhead_cost_to_sum = portions * m[key_portions]["profit"]
+				total_overhead_cost_to_sum = s.cvp[key_portions_to]["profit"] * portions_to
 			case "percent_from_contribution_margin":
-				total_overhead_cost_to_sum = portions * m[key_portions]["contribution_margin"]
-
+				total_overhead_cost_to_sum = s.cvp[key_portions_to]["contribution_margin"] * portions_to
 			default:
 				log.Panic(step.distribution_method, " is not in [units_gap,1,equally,portions,units,variable_cost,fixed_cost,mixed_cost,sales,profit,contribution_margin,percent_from_variable_cost,percent_from_fixed_cost,percent_from_mixed_cost,percent_from_sales,percent_from_profit,percent_from_contribution_margin]")
 			}
 			switch step.sales_or_variable_or_fixed {
 			case "sales":
-				m[key_portions]["sales_per_unit"] = ((m[key_portions]["sales_per_unit"] * m[key_portions]["units"]) - total_overhead_cost_to_sum) / m[key_portions]["units"]
-			case "variable":
-				m[key_portions]["variable_cost_per_unit"] = ((m[key_portions]["variable_cost_per_unit"] * m[key_portions]["units"]) + total_overhead_cost_to_sum) / m[key_portions]["units"]
-			case "fixed":
-				m[key_portions]["fixed_cost"] += total_overhead_cost_to_sum
+				s.cvp[key_portions_to]["sales_per_units"] = ((s.cvp[key_portions_to]["sales_per_units"] * s.cvp[key_portions_to]["units"]) - total_overhead_cost_to_sum) / s.cvp[key_portions_to]["units"]
+			case "variable_cost":
+				s.cvp[key_portions_to]["variable_cost_per_units"] = ((s.cvp[key_portions_to]["variable_cost_per_units"] * s.cvp[key_portions_to]["units"]) + total_overhead_cost_to_sum) / s.cvp[key_portions_to]["units"]
+			case "fixed_cost":
+				s.cvp[key_portions_to]["fixed_cost"] += total_overhead_cost_to_sum
 			default:
-				log.Panic(step.sales_or_variable_or_fixed, " is not in [sales,variable,fixed]")
+				log.Panic(step.sales_or_variable_or_fixed, " is not in [sales,variable_cost,fixed_cost]")
 			}
-			cost_volume_profit(m, key_portions, m[key_portions]["units_gap"], m[key_portions]["units"], m[key_portions]["sales_per_unit"], m[key_portions]["variable_cost_per_unit"], m[key_portions]["fixed_cost"])
+			for key_name, map_cvp := range s.cvp {
+				s.cvp[key_name] = map[string]float64{"units_gap": map_cvp["units_gap"], "units": map_cvp["units"],
+					"sales_per_units": map_cvp["sales_per_units"], "variable_cost_per_units": map_cvp["variable_cost_per_units"], "fixed_cost": map_cvp["fixed_cost"]}
+			}
+			s.calculate_cvp_map()
 		}
 	}
-	for key_name, _ := range m {
-		cost_volume_profit(m, key_name, m[key_name]["units_gap"], m[key_name]["units"], m[key_name]["sales_per_unit"], m[key_name]["variable_cost_per_unit"], m[key_name]["fixed_cost"])
+	s.total_cost_volume_profit()
+	s.check_map_keys()
+}
+
+func (s Managerial_Accounting) check_map_keys() {
+	elements := []string{
+		"break_even_in_sales", "break_even_in_units", "sales_per_units",
+		"fixed_cost", "break_even_in_units", "contribution_margin_per_units",
+		"contribution_margin_per_units", "contribution_margin_ratio", "sales_per_units",
+		"contribution_margin", "degree_of_operating_leverage", "profit",
+		"variable_cost", "variable_cost_per_units", "units",
+		"fixed_cost", "fixed_cost_per_units", "units",
+		"mixed_cost", "mixed_cost_per_units", "units",
+		"sales", "sales_per_units", "units",
+		"profit", "profit_per_units", "units",
+		"contribution_margin", "contribution_margin_per_units", "units",
+		"mixed_cost", "fixed_cost", "variable_cost",
+		"sales", "profit", "mixed_cost",
+		"sales", "contribution_margin", "variable_cost",
+		"units_gap",
 	}
-	total_cost_volume_profit(m)
-	return m
+	for _, a := range s.cvp {
+		for keyb, _ := range a {
+			if !is_in(keyb, elements) {
+				log.Panic(keyb, " is not in ", elements)
+			}
+		}
+	}
+}
+
+func (s Managerial_Accounting) calculate_cvp_map() {
+	for _, i := range s.cvp {
+		cost_volume_profit(i)
+		_, ok_variable_cost_per_units := i["variable_cost_per_units"]
+		if !ok_variable_cost_per_units {
+			i["variable_cost_per_units"] = 0
+			cost_volume_profit(i)
+		}
+		_, ok_fixed_cost := i["fixed_cost"]
+		if !ok_fixed_cost {
+			i["fixed_cost"] = 0
+			cost_volume_profit(i)
+		}
+		_, ok_sales_per_units := i["sales_per_units"]
+		if !ok_sales_per_units {
+			i["sales_per_units"] = 0
+			cost_volume_profit(i)
+		}
+		_, ok_units := i["units"]
+		if !ok_units {
+			i["units"] = 0
+			cost_volume_profit(i)
+		}
+	}
+}
+
+func (s Managerial_Accounting) total_cost_volume_profit() {
+	var units, sales, variable_cost, fixed_cost float64
+	for key_name, map_name := range s.cvp {
+		if key_name != "total" {
+			units += map_name["units"]
+			sales += map_name["sales"]
+			variable_cost += map_name["variable_cost"]
+			fixed_cost += map_name["fixed_cost"]
+		}
+	}
+	s.cvp["total"] = map[string]float64{"units": units, "sales": sales, "variable_cost": variable_cost, "fixed_cost": fixed_cost}
+	cost_volume_profit(s.cvp["total"])
 }
 
 func (s Managerial_Accounting) equivalent_units() float64 {
@@ -1526,60 +1582,91 @@ func (s Managerial_Accounting) least_squares_regression() (float64, float64) {
 	return m, b
 }
 
-func cost_volume_profit(m map[string]map[string]float64, name string, units_gap, units, sales_per_unit, variable_cost_per_unit, fixed_cost float64) {
-	variable_cost := variable_cost_per_unit * units
-	fixed_cost_per_unit := fixed_cost / units
-	mixed_cost := fixed_cost + variable_cost_per_unit*units
-	mixed_cost_per_unit := mixed_cost / units
-	sales := sales_per_unit * units
-	profit := sales_per_unit*units - mixed_cost
-	profit_per_unit := profit / units
-	contribution_margin_per_unit := sales_per_unit - variable_cost_per_unit
-	contribution_margin := contribution_margin_per_unit * units
-	contribution_margin_ratio := contribution_margin_per_unit / sales_per_unit
-	break_even_in_unit := fixed_cost / contribution_margin_per_unit
-	break_even_in_sales := break_even_in_unit * sales_per_unit
-	degree_of_operating_leverage := contribution_margin / profit
-	m[name] = map[string]float64{}
-
-	m[name]["units_gap"] = units_gap
-	m[name]["units"] = units
-
-	m[name]["break_even_in_sales"] = break_even_in_sales
-	m[name]["break_even_in_unit"] = break_even_in_unit
-	m[name]["contribution_margin_ratio"] = contribution_margin_ratio
-	m[name]["degree_of_operating_leverage"] = degree_of_operating_leverage
-
-	m[name]["variable_cost"] = variable_cost
-	m[name]["fixed_cost"] = fixed_cost
-	m[name]["mixed_cost"] = mixed_cost
-	m[name]["sales"] = sales
-	m[name]["profit"] = profit
-	m[name]["contribution_margin"] = contribution_margin
-
-	m[name]["variable_cost_per_unit"] = variable_cost_per_unit
-	m[name]["fixed_cost_per_unit"] = fixed_cost_per_unit
-	m[name]["mixed_cost_per_unit"] = mixed_cost_per_unit
-	m[name]["sales_per_unit"] = sales_per_unit
-	m[name]["profit_per_unit"] = profit_per_unit
-	m[name]["contribution_margin_per_unit"] = contribution_margin_per_unit
+func cost_volume_profit(m map[string]float64) {
+	equations_solver(m, [][]string{
+		{"variable_cost", "variable_cost_per_units", "*", "units"},
+		{"fixed_cost", "fixed_cost_per_units", "*", "units"},
+		{"mixed_cost", "mixed_cost_per_units", "*", "units"},
+		{"sales", "sales_per_units", "*", "units"},
+		{"profit", "profit_per_units", "*", "units"},
+		{"contribution_margin", "contribution_margin_per_units", "*", "units"},
+		{"mixed_cost", "fixed_cost", "+", "variable_cost"},
+		{"sales", "profit", "+", "mixed_cost"},
+		{"contribution_margin", "sales", "-", "variable_cost"},
+		{"break_even_in_sales", "break_even_in_units", "*", "sales_per_units"},
+		{"break_even_in_units", "contribution_margin_per_units", "/", "fixed_cost"},
+		{"contribution_margin_per_units", "contribution_margin_ratio", "*", "sales_per_units"},
+		{"contribution_margin", "degree_of_operating_leverage", "*", "profit"},
+	})
 }
 
-func total_cost_volume_profit(m map[string]map[string]float64) {
-	var units, sales_per_unit, variable_cost_per_unit, fixed_cost float64
-	for key_name, map_name := range m {
-		if key_name != "total" {
-			units += map_name["units"]
-			sales_per_unit += map_name["sales_per_unit"] * map_name["units"]
-			variable_cost_per_unit += map_name["variable_cost_per_unit"] * map_name["units"]
-			fixed_cost += map_name["fixed_cost"]
+func equations_solver(m map[string]float64, equations [][]string) {
+	for a := 0; a <= len(equations); a++ {
+		for _, equation := range equations {
+			equation_solver(m, equation[0], equation[1], equation[2], equation[3])
 		}
 	}
-	cost_volume_profit(m, "total", 0, units, sales_per_unit/units, variable_cost_per_unit/units, fixed_cost)
 }
 
-func target_sales(target_profit, fixed_cost, contribution_margin_ratio float64) float64 {
-	return (target_profit + fixed_cost) / contribution_margin_ratio
+func equation_solver(m map[string]float64, a, b, sign, c string) {
+	switch sign {
+	case "+":
+		equations_generator(m, a, b, sign, c, m[b]+m[c], m[a]-m[c], m[a]-m[b])
+	case "-":
+		equations_generator(m, a, b, sign, c, m[b]-m[c], m[a]+m[c], m[b]-m[a])
+	case "*":
+		equations_generator(m, a, b, sign, c, m[b]*m[c], m[a]/m[c], m[a]/m[b])
+	case "/":
+		equations_generator(m, a, b, sign, c, m[b]/m[c], m[a]*m[c], m[b]/m[a])
+	case "**":
+		equations_generator(m, a, b, sign, c, math.Pow(m[b], m[c]), math.Pow(m[a], 1/m[c]), math.Log(m[a])/math.Log(m[b]))
+	case "root":
+		equations_generator(m, a, b, sign, c, math.Pow(m[b], 1/m[c]), math.Pow(m[a], m[c]), math.Log(m[b])/math.Log(m[a]))
+	default:
+		log.Panic(sign, " is not in [+-*/**root]")
+	}
+}
+
+func equations_generator(m map[string]float64, a, b, sign, c string, a_value, b_value, c_value float64) {
+	la, oka := m[a]
+	lb, okb := m[b]
+	lc, okc := m[c]
+	var inf bool
+	for _, a := range []float64{m[a], m[b], m[c]} {
+		if math.IsInf(a, 0) {
+			inf = true
+		}
+	}
+	if math.IsNaN(la) {
+		m[a] = 0
+	}
+	if math.IsNaN(lb) {
+		m[b] = 0
+	}
+	if math.IsNaN(lc) {
+		m[c] = 0
+	}
+	if math.IsNaN(a_value) {
+		a_value = 0
+	}
+	switch {
+	case !oka && okb && okc:
+		m[a] = a_value
+		// print_equation(m, a, b, sign, c)
+	case oka && !okb && okc:
+		m[b] = b_value
+		// print_equation(m, a, b, sign, c)
+	case oka && okb && !okc:
+		m[c] = c_value
+		// print_equation(m, a, b, sign, c)
+	case oka && okb && okc && math.Round(la*1000)/1000 != math.Round(a_value*1000)/1000 && !inf:
+		log.Panic(a, " : ", m[a], " != ", b, " : ", m[b], " ", sign, " ", c, " : ", m[c])
+	default:
+	}
+}
+
+func print_equation(m map[string]float64, a, b, sign, c string) {
+	fmt.Println(a, " : ", m[a], " = ", b, " : ", m[b], " ", sign, " ", c, " : ", m[c])
 }
 
 func main() {
@@ -1654,12 +1741,12 @@ func main() {
 
 	// i.reverse_entry(8, "hashem")
 
-	all_financial_statements, _, _ := i.financial_statements(
-		time.Date(2020, time.January, 1, 0, 0, 0, 0, time.Local),
-		time.Date(2022, time.December, 25, 0, 0, 0, 0, time.Local),
-		1, []string{}, false)
+	// all_financial_statements, _, _ := i.financial_statements(
+	// 	time.Date(2020, time.January, 1, 0, 0, 0, 0, time.Local),
+	// 	time.Date(2022, time.December, 25, 0, 0, 0, 0, time.Local),
+	// 	1, []string{}, false)
 
-	filtered_statement := i.statement_filter(all_financial_statements, []string{"cash", "book"}, []string{"cash", "book"}, []string{"names", "all"}, []string{"value"}, []string{"flow"}, true, true, true, true, true)
+	// filtered_statement := i.statement_filter(all_financial_statements, []string{"cash", "book"}, []string{"cash", "book"}, []string{"names", "all"}, []string{"value"}, []string{"flow"}, true, true, true, true, true)
 
 	// for _, i := range entry {
 	// 	fmt.Fprintln(p, "\t", i.date, "\t", i.entry_number, "\t", i.account, "\t", i.value, "\t", i.price, "\t", i.quantity, "\t", i.barcode, "\t", i.entry_expair, "\t", i.description, "\t", i.name, "\t", i.employee_name, "\t", i.entry_date, "\t", i.reverse)
@@ -1675,30 +1762,29 @@ func main() {
 	// 	fmt.Fprintln(p, a.current_ratio, "\t", a.acid_test, "\t", a.receivables_turnover, "\t", a.inventory_turnover, "\t", a.profit_margin, "\t", a.asset_turnover, "\t", a.return_on_assets, "\t", a.return_on_equity, "\t", a.return_on_common_stockholders_equity, "\t", a.earnings_per_share, "\t", a.price_earnings_ratio, "\t", a.payout_ratio, "\t", a.debt_to_total_assets_ratio, "\t", a.times_interest_earned, "\t")
 	// }
 
-	for _, a := range filtered_statement {
-		for _, b := range a {
-			fmt.Fprintln(p, b.key_account_flow, "\t", b.key_account, "\t", b.key_name, "\t", b.key_vpq, "\t", b.key_number, "\t", b.number)
-		}
-	}
+	// for _, a := range filtered_statement {
+	// 	for _, b := range a {
+	// 		fmt.Fprintln(p, b.key_account_flow, "\t", b.key_account, "\t", b.key_name, "\t", b.key_vpq, "\t", b.key_number, "\t", b.number)
+	// 	}
+	// }
 
 	// a1, ok1 := all_financial_statements[0]["panadol"]["cash"]["zaid"]["value"]["inflow"]
 	// a2, ok2 := all_financial_statements[0]["cash"]["panadol"]["zaid"]["value"]["outflow"]
 	// fmt.Println(a1, ok1)
 	// fmt.Println(a2, ok2)
 
-	// point := Managerial_Accounting{
-	// 	cvp: []cvp{
-	// 		{"falafel", 0, 1, 10, 0, 0},
-	// 		{"gas", 0, 1, 0, 1, 0},
-	// 		{"cooker", 0, 1, 0, 0, 1},
-	// 		{"marketing", 0, 1, 0, 0, 1},
-	// 	},
-	// 	distribution_steps: []one_step_distribution{{"sales", "percent_from_sales", map[string]float64{"gas": 1, "cooker": 1, "marketing": 1}, map[string]float64{"falafel": 0.15}}},
-	// }
-	// j := point.cost_volume_profit_slice()
-	// fmt.Fprintln(p, "name\t", "units\t", "sales_per_unit\t", "variable_cost_per_unit\t", "fixed_cost\t", "mixed_cost\t", "mixed_cost_per_unit\t", "sales\t", "profit\t", "profit_per_unit\t", "contribution_margin_per_unit\t", "contribution_margin\t", "contribution_margin_ratio\t", "break_even_in_unit\t", "break_even_in_sales\t", "degree_of_operating_leverage\t")
-	// for key_name, i := range j {
-	// 	fmt.Fprintln(p, key_name, "\t", i["units"], "\t", i["sales_per_unit"], "\t", i["variable_cost_per_unit"], "\t", i["fixed_cost"], "\t", i["mixed_cost"], "\t", i["mixed_cost_per_unit"], "\t", i["sales"], "\t", i["profit"], "\t", i["profit_per_unit"], "\t", i["contribution_margin_per_unit"], "\t", i["contribution_margin"], "\t", i["contribution_margin_ratio"], "\t", i["break_even_in_unit"], "\t", i["break_even_in_sales"], "\t", i["degree_of_operating_leverage"], "\t")
-	// }
+	point := Managerial_Accounting{
+		cvp: map[string]map[string]float64{
+			"yasa_clinic": {"units": 6 * 4 * 4, "sales_per_units": 70000},
+			"electric":    {"units": 80, "fixed_cost": 500000},
+			"rent":        {"units": 100, "fixed_cost": 1000000},
+		},
+		distribution_steps: []one_step_distribution{{"fixed_cost", "units", map[string]float64{"electric": 80}, map[string]float64{"yasa_clinic": 10}}},
+	}
+	point.cost_volume_profit_slice()
+	fmt.Fprintln(p, "key_name", "\t", "units", "\t", "sales_per_units", "\t", "variable_cost_per_units", "\t", "variable_cost", "\t", "fixed_cost", "\t", "mixed_cost", "\t", "mixed_cost_per_units", "\t", "sales", "\t", "profit", "\t", "profit_per_units", "\t", "contribution_margin_per_units", "\t", "contribution_margin", "\t", "contribution_margin_ratio", "\t", "break_even_in_unit", "\t", "break_even_in_sales", "\t", "degree_of_operating_leverage", "\t")
+	for key_name, i := range point.cvp {
+		fmt.Fprintln(p, key_name, "\t", i["units"], "\t", i["sales_per_units"], "\t", i["variable_cost_per_units"], "\t", i["variable_cost"], "\t", i["fixed_cost"], "\t", i["mixed_cost"], "\t", i["mixed_cost_per_units"], "\t", i["sales"], "\t", i["profit"], "\t", i["profit_per_units"], "\t", i["contribution_margin_per_units"], "\t", i["contribution_margin"], "\t", i["contribution_margin_ratio"], "\t", i["break_even_in_unit"], "\t", i["break_even_in_sales"], "\t", i["degree_of_operating_leverage"], "\t")
+	}
 	p.Flush()
 }
