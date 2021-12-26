@@ -1508,7 +1508,7 @@ func (s Managerial_Accounting) calculate_cvp_map() {
 		}
 		_, ok_units := i["units"]
 		if !ok_units {
-			i["units"] = 0
+			i["units"] = 1
 			cost_volume_profit(i)
 		}
 	}
@@ -1652,16 +1652,15 @@ func equations_generator(m map[string]float64, a, b, sign, c string, a_value, b_
 	switch {
 	case !oka && okb && okc:
 		m[a] = a_value
-		// print_equation(m, a, b, sign, c)
+		print_equation(m, a, b, sign, c)
 	case oka && !okb && okc:
 		m[b] = b_value
-		// print_equation(m, a, b, sign, c)
+		print_equation(m, a, b, sign, c)
 	case oka && okb && !okc:
 		m[c] = c_value
-		// print_equation(m, a, b, sign, c)
+		print_equation(m, a, b, sign, c)
 	case oka && okb && okc && math.Round(la*1000)/1000 != math.Round(a_value*1000)/1000 && !inf:
 		log.Panic(a, " : ", m[a], " != ", b, " : ", m[b], " ", sign, " ", c, " : ", m[c])
-	default:
 	}
 }
 
@@ -1777,7 +1776,7 @@ func main() {
 		cvp: map[string]map[string]float64{
 			"yasa_clinic": {"units": 6 * 4 * 4, "sales_per_units": 70000},
 			"electric":    {"units": 80, "fixed_cost": 500000},
-			"rent":        {"units": 100, "fixed_cost": 1000000},
+			"rent":        {"fixed_cost": 1000000},
 		},
 		distribution_steps: []one_step_distribution{{"fixed_cost", "units", map[string]float64{"electric": 80}, map[string]float64{"yasa_clinic": 10}}},
 	}
