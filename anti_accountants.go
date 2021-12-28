@@ -172,7 +172,7 @@ func (s Financial_accounting) initialize() {
 		}
 		all_accounts = append(all_accounts, i.name)
 		switch {
-		case is_in(i.cost_flow_type, []string{"fifo", "lifo", "wma"}) && !s.is_father(s.retained_earnings, i.name) && !i.is_credit:
+		case IS_IN(i.cost_flow_type, []string{"fifo", "lifo", "wma"}) && !s.is_father(s.retained_earnings, i.name) && !i.is_credit:
 			inventory = append(inventory, i.name)
 		case i.cost_flow_type == "":
 		default:
@@ -266,7 +266,7 @@ func (s Financial_accounting) journal_entry(array_of_entry []Account_value_quant
 	var all_array_to_insert []journal_tag
 	for _, simple_entry := range simple_entries {
 		array_to_insert := insert_to_journal_tag(simple_entry, date, entry_expair, description, name, employee_name)
-		if is_in(adjusting_method, depreciation_methods[:]) {
+		if IS_IN(adjusting_method, depreciation_methods[:]) {
 			adjusted_array_to_insert := adjuste_the_array(entry_expair, date, array_day_start_end, array_to_insert, adjusting_method, description, name, employee_name)
 			adjusted_array_to_insert = transpose(adjusted_array_to_insert)
 			array_to_insert = unpack_the_array(array_to_insert, adjusted_array_to_insert)
@@ -315,15 +315,15 @@ func (s Financial_accounting) statement_filter(all_financial_statements []map[st
 	for _, statement := range all_financial_statements {
 		var statement_struct []filtered_statement
 		for key_account_flow, map_account_flow := range statement {
-			if is_in(key_account_flow, account_flow_slice) == in_account_flow_slice {
+			if IS_IN(key_account_flow, account_flow_slice) == in_account_flow_slice {
 				for key_account, map_account := range map_account_flow {
-					if is_in(key_account, account_slice) == in_account_slice {
+					if IS_IN(key_account, account_slice) == in_account_slice {
 						for key_name, map_name := range map_account {
-							if is_in(key_name, name_slice) == in_name_slice {
+							if IS_IN(key_name, name_slice) == in_name_slice {
 								for key_vpq, map_vpq := range map_name {
-									if is_in(key_vpq, vpq_slice) == in_vpq_slice {
+									if IS_IN(key_vpq, vpq_slice) == in_vpq_slice {
 										for key_number, number := range map_vpq {
-											if is_in(key_number, number_slice) == in_number_slice {
+											if IS_IN(key_number, number_slice) == in_number_slice {
 												statement_struct = append(statement_struct, filtered_statement{key_account_flow, key_account, key_name, key_vpq, key_number, number})
 											}
 										}
@@ -421,7 +421,7 @@ func (s Financial_accounting) invoice(array_of_journal_tag []journal_tag) []invo
 	for _, entry := range array_of_journal_tag {
 		var key string
 		switch {
-		case s.is_father(s.assets, entry.account) && !s.is_credit(entry.account) && !is_in(entry.account, inventory) && entry.value > 0:
+		case s.is_father(s.assets, entry.account) && !s.is_credit(entry.account) && !IS_IN(entry.account, inventory) && entry.value > 0:
 			key = "total"
 		case s.is_father(s.discounts, entry.account) && !s.is_credit(entry.account):
 			key = "total discounts"
@@ -490,7 +490,7 @@ func (s Financial_accounting) insert_to_database(array_of_journal_tag []journal_
 				&entry.date, &entry.entry_number, &entry.account, &entry.value, &entry.price, &entry.quantity, &entry.barcode,
 				&entry.entry_expair, &entry.description, &entry.name, &entry.employee_name, &entry.entry_date, &entry.reverse)
 		}
-		if is_in(entry.account, inventory) {
+		if IS_IN(entry.account, inventory) {
 			costs := s.cost_flow(entry.account, entry.quantity, entry.barcode, inventory_flow)
 			if insert_into_inventory && costs == 0 {
 				db.Exec("insert into inventory(date,account,price,quantity,barcode,entry_expair,name,employee_name,entry_date)values (?,?,?,?,?,?,?,?,?)",
@@ -793,14 +793,14 @@ func (s Financial_accounting) sum_1st_column(statement map[string]map[string]map
 			}
 		}
 		for key_account_flow, map_account_flow := range statement {
-			if is_in(key_account_flow, flow_accounts) {
+			if IS_IN(key_account_flow, flow_accounts) {
 				for key_account, map_account := range map_account_flow {
 					for key_name, map_name := range map_account {
 						for key_vpq, map_vpq := range map_name {
 							map_vpq1 := initialize_map_4(new_statement, a.name, key_account, key_name, key_vpq)
 							for key_number, number := range map_vpq {
 								switch {
-								case is_in(key_number, []string{"inflow", "outflow"}):
+								case IS_IN(key_number, []string{"inflow", "outflow"}):
 									if s.is_credit(a.name) == s.is_credit(key_account_flow) {
 										map_vpq1[key_number] += number
 									} else {
@@ -835,7 +835,7 @@ func (s Financial_accounting) sum_2nd_column(statement map[string]map[string]map
 								map_vpq1 := initialize_map_4(new_statement, key_account_flow, ss.name, key_name, key_vpq)
 								for key_number, number := range map_vpq {
 									switch {
-									case !is_in(key_number, []string{"inflow", "outflow"}):
+									case !IS_IN(key_number, []string{"inflow", "outflow"}):
 										if s.is_credit(key1) == s.is_credit(ss.name) {
 											map_vpq1[key_number] += number
 										} else {
@@ -869,8 +869,8 @@ func sum_3rd_column(statement map[string]map[string]map[string]map[string]map[st
 			}
 			for key_name, map_name := range map_account {
 				var ok bool
-				if !is_in(key_name, append(exempt_names, name)) {
-					if is_in(key_name, names) == in_names {
+				if !IS_IN(key_name, append(exempt_names, name)) {
+					if IS_IN(key_name, names) == in_names {
 						ok = true
 					}
 					if ok {
@@ -1074,18 +1074,18 @@ func adjuste_the_array(entry_expair time.Time, date time.Time, array_day_start_e
 }
 
 func check_the_params(entry_expair time.Time, adjusting_method string, date time.Time, array_of_entry []Account_value_quantity_barcode, array_day_start_end []day_start_end) []day_start_end {
-	if entry_expair.IsZero() == is_in(adjusting_method, adjusting_methods[:]) {
+	if entry_expair.IsZero() == IS_IN(adjusting_method, adjusting_methods[:]) {
 		log.Panic("check entry_expair => ", entry_expair, " and adjusting_method => ", adjusting_method, " should be in ", adjusting_methods)
 	}
 	if !entry_expair.IsZero() {
 		check_dates(date, entry_expair)
 	}
 	for _, entry := range array_of_entry {
-		if is_in(entry.Account, inventory) && !is_in(adjusting_method, []string{"expire", ""}) {
+		if IS_IN(entry.Account, inventory) && !IS_IN(adjusting_method, []string{"expire", ""}) {
 			log.Panic(entry.Account + " is in inventory you just can use expire or make it empty")
 		}
 	}
-	if is_in(adjusting_method, depreciation_methods[:]) {
+	if IS_IN(adjusting_method, depreciation_methods[:]) {
 		if len(array_day_start_end) == 0 {
 			array_day_start_end = []day_start_end{
 				{"saturday", 0, 0, 23, 59},
@@ -1099,7 +1099,7 @@ func check_the_params(entry_expair time.Time, adjusting_method string, date time
 		for index, element := range array_day_start_end {
 			array_day_start_end[index].day = strings.Title(element.day)
 			switch {
-			case !is_in(array_day_start_end[index].day, standard_days[:]):
+			case !IS_IN(array_day_start_end[index].day, standard_days[:]):
 				log.Panic("error ", element.day, " for ", element, " is not in ", standard_days)
 			case element.start_hour < 0:
 				log.Panic("error ", element.start_hour, " for ", element, " is < 0")
@@ -1253,7 +1253,7 @@ func change_account_name(name, new_name string) {
 	}
 }
 
-func is_in(element string, elements []string) bool {
+func IS_IN(element string, elements []string) bool {
 	for _, a := range elements {
 		if a == element {
 			return true
@@ -1268,7 +1268,7 @@ func check_accounts(column, table, panic string, elements []string) {
 	for results.Next() {
 		var tag string
 		results.Scan(&tag)
-		if !is_in(tag, elements) {
+		if !IS_IN(tag, elements) {
 			log.Panic(tag + panic)
 		}
 	}
@@ -1481,7 +1481,7 @@ func (s Managerial_Accounting) check_map_keys() {
 	}
 	for _, a := range s.cvp {
 		for keyb, _ := range a {
-			if !is_in(keyb, elements) {
+			if !IS_IN(keyb, elements) {
 				log.Panic(keyb, " is not in ", elements)
 			}
 		}
@@ -1508,7 +1508,7 @@ func (s Managerial_Accounting) calculate_cvp_map() {
 		}
 		_, ok_units := i["units"]
 		if !ok_units {
-			i["units"] = 1
+			i["units"] = 0
 			cost_volume_profit(i)
 		}
 	}
@@ -1619,11 +1619,13 @@ func equation_solver(m map[string]float64, a, b, sign, c string) {
 	case "/":
 		equations_generator(m, a, b, sign, c, m[b]/m[c], m[a]*m[c], m[b]/m[a])
 	case "**":
-		equations_generator(m, a, b, sign, c, math.Pow(m[b], m[c]), math.Pow(m[a], 1/m[c]), math.Log(m[a])/math.Log(m[b]))
+		equations_generator(m, a, b, sign, c, math.Pow(m[b], m[c]), root(m[a], m[c]), Log(m[a], m[b]))
 	case "root":
-		equations_generator(m, a, b, sign, c, math.Pow(m[b], 1/m[c]), math.Pow(m[a], m[c]), math.Log(m[b])/math.Log(m[a]))
+		equations_generator(m, a, b, sign, c, root(m[b], m[c]), math.Pow(m[a], m[c]), Log(m[b], m[a]))
+	case "log":
+		equations_generator(m, a, b, sign, c, Log(m[b], m[c]), math.Pow(m[c], m[a]), root(m[b], m[a]))
 	default:
-		log.Panic(sign, " is not in [+-*/**root]")
+		log.Panic(sign, " is not in [+-*/**root log]")
 	}
 }
 
@@ -1660,13 +1662,16 @@ func equations_generator(m map[string]float64, a, b, sign, c string, a_value, b_
 		m[c] = c_value
 		print_equation(m, a, b, sign, c)
 	case oka && okb && okc && math.Round(la*1000)/1000 != math.Round(a_value*1000)/1000 && !inf:
-		log.Panic(a, " : ", m[a], " != ", b, " : ", m[b], " ", sign, " ", c, " : ", m[c])
+		log.Panic(a, m[a], " != ", b, m[b], " ", sign, " ", c, m[c])
 	}
 }
 
 func print_equation(m map[string]float64, a, b, sign, c string) {
-	fmt.Println(a, " : ", m[a], " = ", b, " : ", m[b], " ", sign, " ", c, " : ", m[c])
+	fmt.Println(a, m[a], " = ", b, m[b], " ", sign, " ", c, m[c])
 }
+
+func Log(a, b float64) float64  { return math.Log(a) / math.Log(b) }
+func root(a, b float64) float64 { return math.Pow(a, 1/b) }
 
 func main() {
 	i := Financial_accounting{
